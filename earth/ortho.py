@@ -17,8 +17,10 @@ own (`sources.year`).
 """
 from __future__ import annotations
 
+import math
 import os
 import threading
+from collections.abc import Callable
 import urllib.error
 import urllib.request
 
@@ -71,11 +73,16 @@ def upstream() -> str:
     return url
 
 
-def fetch(z: int, x: int, y: int) -> tuple[bytes, str, float] | None:
-    """The upstream tile as (bytes, media type, what it cost in tiles made), or None where it has
-    none. OrthoError when asking failed, so the caller answers it."""
+def fetch(z: int, x: int, y: int, before: Callable[[], None],
+          charge: Callable[[float], None]) -> tuple[bytes, str] | None:
+    """The upstream tile as (bytes, media type), or None where it has none. OrthoError when asking
+    failed, so the caller answers it. `before` (refuse an address in debt) runs once this request
+    holds an upstream slot, and `charge` (what the ortho service says the tile cost) before it lets
+    the slot go: so a request checked after another finished sees that one's charge, and an address
+    has at most the slots in flight past its check, not its whole read burst."""
     req = urllib.request.Request(upstream().format(z=z, x=x, y=y), headers={"User-Agent": USER_AGENT})
     with _upstream:
+        before()
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
                 body, cost = r.read(), r.headers.get("X-Ortho-Cost")
@@ -89,10 +96,21 @@ def fetch(z: int, x: int, y: int) -> tuple[bytes, str, float] | None:
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise OrthoError(503, f"the ortho service is unreachable for ortho {z}/{x}/{y}: "
                                   f"{getattr(e, 'reason', e)}")
+        charge(_cost(cost, z, x, y))
     mt = media_type(body)
     if mt is None:
         raise OrthoError(502, f"the ortho service sent something not an image for ortho {z}/{x}/{y} "
                               f"({len(body)} B)")
-    if cost is None:
-        raise OrthoError(502, f"the ortho service did not say what ortho {z}/{x}/{y} cost (X-Ortho-Cost)")
-    return body, mt, float(cost)
+    return body, mt
+
+
+def _cost(header: str | None, z: int, x: int, y: int) -> float:
+    """X-Ortho-Cost: a finite count, 0 or more; anything else is the ortho service's fault (502)."""
+    try:
+        cost = float(header) if header is not None else math.nan
+    except ValueError:
+        cost = math.nan
+    if not math.isfinite(cost) or cost < 0:
+        raise OrthoError(502, f"the ortho service did not say what ortho {z}/{x}/{y} cost "
+                              f"(X-Ortho-Cost: {header!r})")
+    return cost

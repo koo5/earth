@@ -8,7 +8,7 @@
                                         a terrain tile (tiles.py), made on first ask and kept
   POST /t/{release}/terrain/ground      the ground at given points, or over a box (ground.py)
   GET /t/{release}/ortho/{z}/{x}/{y}.jpg
-                                        the orthophoto (ortho.py), fetched on first ask and kept
+                                        the orthophoto (ortho.py), from the ortho service, never kept
   GET /t/{release}/osm/{z}/{x}/{y}.mvt  the map (osm.py), from the release's PMTiles archive
   GET /t/{release}/models/manifest.json the city models (citymodels.py): the release's manifest
   GET /t/{release}/models/assets/{sha256}.glb
@@ -195,7 +195,8 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
         """ČÚZK's orthophoto tile from the ortho service, as it came (JPEG; PNG where it holds no sheet,
         said by Content-Type). Nothing is kept here: the ortho service caches what it draws and drops
         what a new sheet changes, so a copy here would go stale. A read, plus what the ortho service
-        says the tile cost (sheets fetched, a tile drawn) charged to the make bucket afterwards."""
+        says the tile cost (sheets fetched, a tile drawn) charged to the make bucket: checked and
+        charged inside the upstream slot (ortho.fetch)."""
         lim().check_read(request)
         r = st().release(rid)
         if r is None or r.layer != "ortho":
@@ -204,15 +205,14 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
             raise HTTPException(404, f"no ortho tile {z}/{x}/{y} (zoom 0..{ortho.MAX_Z})")
         if not ortho.covered(z, x, y):
             raise HTTPException(404, "no orthophoto outside Czechia")
-        lim().check_owed(request)
         try:
-            got = await run_in_threadpool(ortho.fetch, z, x, y)
+            got = await run_in_threadpool(ortho.fetch, z, x, y, lambda: lim().check_owed(request),
+                                          lambda cost: lim().charge_make(request, cost))
         except ortho.OrthoError as e:
             raise HTTPException(e.status, e.detail)
         if got is None:
             raise HTTPException(404, f"no orthophoto at {z}/{x}/{y}")
-        body, mt, cost = got
-        lim().charge_make(request, cost)
+        body, mt = got
         return Response(body, media_type=mt,
                         headers={"Cache-Control": LIVE, "X-Attribution": "cuzk-ortho"})
 
