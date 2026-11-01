@@ -1,12 +1,13 @@
-"""The sheets held on disk: fetched when a detail tile first needs them, indexed for MapServer, evicted by
-last use under a disk budget.
+"""The sheets held on disk: fetched when a detail tile first needs them, indexed for MapServer, and kept for
+good. A sheet is never downloaded twice: when the budget is reached (or the disk's free space runs low),
+fetching stops and a tile that needs a sheet not held is refused; more storage is the answer, not eviction.
 
 - A sheet is downloaded once, by whichever request asks first (a lock per sheet; several gunicorn workers),
   from ČÚZK's open-data endpoint as <id>.zip, and published as get_tiles.sh did: sidecars first, the .jp2
   last by an atomic rename, so a reader never sees half a sheet.
 - MapServer finds the held sheets through a tile index, sheets.csv (location + its exact 2 km square as WKT,
   read by OGR's CSV driver), rewritten atomically on every change. Nothing reads a JP2 to index it.
-- sheets.sqlite records each sheet's size, arrival, last use and whether the overview has it yet.
+- sheets.sqlite records each sheet's size, arrival and whether the overview has it yet.
 """
 from __future__ import annotations
 
@@ -25,25 +26,33 @@ from pathlib import Path
 
 import sheets as S
 
-TOUCH_EVERY_S = 60          # last use is a day-scale signal: one write a minute per sheet is plenty
-
 
 class SheetMissing(RuntimeError):
     pass
 
 
+class StoreFull(RuntimeError):
+    """The budget is reached or the disk is nearly full: no sheet is fetched any more."""
+
+
 class Store:
-    def __init__(self, data_dir: str, state_dir: str, sheets_url: str, fetch_jobs: int = 4):
+    def __init__(self, data_dir: str, state_dir: str, sheets_url: str, fetch_jobs: int,
+                 budget_bytes: int, min_free_bytes: int):
         self.data, self.state = Path(data_dir), Path(state_dir)
         self.url = sheets_url.rstrip("/")
         self.jobs = fetch_jobs
+        self.budget, self.min_free = budget_bytes, min_free_bytes
         self.db_path = self.state / "sheets.sqlite"
         self.index = self.state / "sheets.csv"
         for d in (self.data / ".locks", self.data / ".tmp", self.state):
             d.mkdir(parents=True, exist_ok=True)
         with self._db() as con:
             con.execute("CREATE TABLE IF NOT EXISTS sheets (id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, "
-                        "arrived REAL NOT NULL, last_used REAL NOT NULL, in_overview INTEGER NOT NULL DEFAULT 0)")
+                        "arrived REAL NOT NULL, in_overview INTEGER NOT NULL DEFAULT 0)")
+
+    @classmethod
+    def of(cls, cfg) -> "Store":
+        return cls(cfg.data_dir, cfg.state_dir, cfg.sheets_url, cfg.fetch_jobs, cfg.budget_bytes, cfg.min_free_bytes)
 
     # -- plumbing ---------------------------------------------------------------------------------
     def _db(self) -> sqlite3.Connection:
@@ -52,9 +61,9 @@ class Store:
         return con
 
     @contextlib.contextmanager
-    def lock(self, name: str, shared: bool = False):
+    def lock(self, name: str):
         with open(self.data / ".locks" / f"{name}.lock", "a") as fh:
-            fcntl.flock(fh, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+            fcntl.flock(fh, fcntl.LOCK_EX)
             yield
 
     def jp2(self, sid: str) -> Path:
@@ -64,37 +73,42 @@ class Store:
         return [self.data / f"{sid}{ext}" for ext in (".jp2", ".j2w", ".gml")]
 
     # -- fetching ---------------------------------------------------------------------------------
-    @contextlib.contextmanager
-    def holding(self, ids: list[str]):
-        """While the body runs (a tile render), every sheet in `ids` is on disk, indexed, and cannot be
-        evicted: a shared lock per sheet, taken BEFORE looking, which eviction's exclusive lock waits for.
-        Missing ones are fetched first (locks dropped meanwhile, so no render waits on a download it does
-        not need). A sheet that cannot be fetched raises: a detail tile is never drawn with one missing."""
-        ids = sorted(set(ids))
-        while True:
-            with contextlib.ExitStack() as held:
-                for s in ids:
-                    held.enter_context(self.lock(s, shared=True))
-                missing = [s for s in ids if not self.jp2(s).exists()]
-                if not missing:
-                    self.touch(ids)
-                    yield
-                    return
-            self.fetch(missing)
+    def ensure(self, ids: list[str]) -> int:
+        """Every sheet in `ids` on disk and indexed, the missing ones fetched first; a sheet once here stays.
+        How many this call fetched. SheetMissing when one cannot be fetched, StoreFull when fetching has
+        stopped: a detail tile is never drawn with a sheet missing."""
+        missing = [s for s in sorted(set(ids)) if not self.jp2(s).exists()]
+        return len(self.fetch(missing)) if missing else 0
+
+    def full(self) -> bool:
+        """At the budget, or the disk's free space below the reserve (it is shared with the rest of earth)."""
+        return self.held_bytes() >= self.budget or shutil.disk_usage(self.data).free < self.min_free
 
     def fetch(self, ids: list[str]) -> list[str]:
-        """Fetch the sheets in `ids` not on disk yet, several at once; the ones this call fetched."""
+        """Fetch the sheets in `ids` not on disk yet, several at once; the ones this call fetched. The ones
+        that arrived are indexed even when another failed; then the first failure is raised."""
         with ThreadPoolExecutor(max(1, min(self.jobs, len(ids)))) as pool:
-            results = list(pool.map(self._fetch, ids))
-        new = [s for s, fetched in zip(ids, results) if fetched]
+            futures = [pool.submit(self._fetch, s) for s in ids]
+        new, failed = [], None
+        for s, f in zip(ids, futures):
+            if f.exception() is not None:
+                failed = failed or f.exception()
+            elif f.result():
+                new.append(s)
         if new:
             self.reindex()
+        if failed is not None:
+            raise failed
         return new
 
     def _fetch(self, sid: str) -> bool:
         with self.lock(sid):
             if self.jp2(sid).exists():
                 return False                            # another request fetched it meanwhile
+            if self.full():                             # a few fetches in flight may pass it together
+                raise StoreFull(f"sheet storage full ({self.held_bytes() / 1e9:.0f} GB held, budget "
+                                f"{self.budget / 1e9:.0f} GB, {shutil.disk_usage(self.data).free / 1e9:.0f} GB "
+                                f"free): {sid} not fetched")
             tmp = Path(tempfile.mkdtemp(prefix=f"{sid}-", dir=self.data / ".tmp"))
             try:
                 zpath = tmp / f"{sid}.zip"
@@ -112,19 +126,11 @@ class Store:
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
             size = sum(p.stat().st_size for p in self._files(sid) if p.exists())
-            now = time.time()
             with self._db() as con:
-                con.execute("INSERT OR REPLACE INTO sheets VALUES (?, ?, ?, ?, 0)", (sid, size, now, now))
+                con.execute("INSERT OR REPLACE INTO sheets (id, bytes, arrived, in_overview) VALUES (?, ?, ?, 0)",
+                            (sid, size, time.time()))
             print(f"[sheets] fetched {sid} ({size / 1e6:.0f} MB)", flush=True)
             return True
-
-    def touch(self, ids: list[str]) -> None:
-        if not ids:
-            return
-        now = time.time()
-        with self._db() as con:
-            con.executemany("UPDATE sheets SET last_used = ? WHERE id = ? AND last_used < ?",
-                            [(now, s, now - TOUCH_EVERY_S) for s in ids])
 
     # -- the index MapServer reads ----------------------------------------------------------------
     def reindex(self) -> None:
@@ -150,8 +156,8 @@ class Store:
             rows = {r[0] for r in con.execute("SELECT id FROM sheets")}
             for sid in on_disk - rows:
                 size = sum(p.stat().st_size for p in self._files(sid) if p.exists())
-                mtime = self.jp2(sid).stat().st_mtime
-                con.execute("INSERT INTO sheets VALUES (?, ?, ?, ?, 0)", (sid, size, mtime, mtime))
+                con.execute("INSERT INTO sheets (id, bytes, arrived, in_overview) VALUES (?, ?, ?, 0)",
+                            (sid, size, self.jp2(sid).stat().st_mtime))
             con.executemany("DELETE FROM sheets WHERE id = ?", [(s,) for s in rows - on_disk])
         print(f"[sheets] held: {len(on_disk)} ({len(on_disk - rows)} found unrecorded, "
               f"{len(rows - on_disk)} recorded but gone)", flush=True)
@@ -170,31 +176,6 @@ class Store:
     def held_bytes(self) -> int:
         with self._db() as con:
             return con.execute("SELECT COALESCE(SUM(bytes), 0) FROM sheets").fetchone()[0]
-
-    def evict(self, high: int, low: int) -> list[str]:
-        """Past `high` bytes, the least recently used sheets go until `low` is reached (a hysteresis: no
-        sheet-by-sheet churn at the line). A sheet the overview has not taken yet stays. Out of the index
-        first, then off the disk; the overview keeps its pixels."""
-        total = self.held_bytes()
-        if total <= high:
-            return []
-        gone = []
-        with self._db() as con:
-            rows = list(con.execute("SELECT id, bytes FROM sheets WHERE in_overview = 1 ORDER BY last_used"))
-        for sid, size in rows:
-            if total <= low:
-                break
-            with self.lock(sid):                    # waits for renders holding it (holding())
-                with self._db() as con:
-                    con.execute("DELETE FROM sheets WHERE id = ?", (sid,))
-                self.reindex()
-                for p in self._files(sid):
-                    p.unlink(missing_ok=True)
-            gone.append(sid)
-            total -= size
-        if gone:
-            print(f"[sheets] evicted {len(gone)} (least recently used), {total / 1e9:.0f} GB held", flush=True)
-        return gone
 
 
 def download(url: str, dest: Path, attempts: int = 4) -> None:

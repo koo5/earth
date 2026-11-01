@@ -52,6 +52,15 @@ def http(path, timeout=30):
         return e.code, e.headers.get("Content-Type", ""), e.read()
 
 
+def http_full(path, timeout=30):
+    """GET BASE+path -> (status, headers, body)."""
+    try:
+        with urllib.request.urlopen(BASE + path, timeout=timeout) as r:
+            return r.status, r.headers, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers, e.read()
+
+
 def deg2tile(lat, lon, z):
     """WGS84 -> slippy XYZ tile (x, y) at zoom z."""
     n = 2 ** z

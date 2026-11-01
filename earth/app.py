@@ -192,37 +192,29 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
 
     @app.get("/t/{rid}/ortho/{z}/{x}/{y}.jpg")
     async def ortho_tile(rid: str, z: int, x: int, y: int, request: Request):
-        """ČÚZK's orthophoto tile, as ČÚZK sent it (JPEG; PNG at the coverage's edge, said by
-        Content-Type). Kept on first ask; 404 where there is none, which is not kept either, so
-        a tile ČÚZK adds later is found."""
+        """ČÚZK's orthophoto tile from the ortho service, as it came (JPEG; PNG where it holds no sheet,
+        said by Content-Type). Nothing is kept here: the ortho service caches what it draws and drops
+        what a new sheet changes, so a copy here would go stale. A read, plus what the ortho service
+        says the tile cost (sheets fetched, a tile drawn) charged to the make bucket afterwards."""
         lim().check_read(request)
         r = st().release(rid)
         if r is None or r.layer != "ortho":
             raise HTTPException(404, f"no ortho release {rid}")
         if not (0 <= z <= ortho.MAX_Z and 0 <= x < 1 << z and 0 <= y < 1 << z):
             raise HTTPException(404, f"no ortho tile {z}/{x}/{y} (zoom 0..{ortho.MAX_Z})")
-        cache = IMMUTABLE if r.immutable else LIVE
-        hit = await run_in_threadpool(st().get_tile, rid, "cuzk", z, x, y, "img", "u", "ortho")
-        if hit is not None:
-            return Response(hit[0], media_type=hit[1]["Content-Type"],
-                            headers={"Cache-Control": cache, "X-Tile-Kept": "1", "X-Attribution": "cuzk-ortho"})
         if not ortho.covered(z, x, y):
             raise HTTPException(404, "no orthophoto outside Czechia")
-        if r.immutable:
-            raise HTTPException(404, f"release {rid} is frozen and never kept this tile")
-        lim().check_make(request)
-        async with lim().making:
-            try:
-                got = await run_in_threadpool(ortho.fetch, z, x, y)
-            except ortho.OrthoError as e:
-                raise HTTPException(e.status, e.detail)
+        lim().check_owed(request)
+        try:
+            got = await run_in_threadpool(ortho.fetch, z, x, y)
+        except ortho.OrthoError as e:
+            raise HTTPException(e.status, e.detail)
         if got is None:
-            raise HTTPException(404, f"ČÚZK has no orthophoto at {z}/{x}/{y}")
-        body, mt = got
-        await run_in_threadpool(st().put_tile, rid, "cuzk", z, x, y, "img", "u", body,
-                                {"Content-Type": mt}, "ortho")
+            raise HTTPException(404, f"no orthophoto at {z}/{x}/{y}")
+        body, mt, cost = got
+        lim().charge_make(request, cost)
         return Response(body, media_type=mt,
-                        headers={"Cache-Control": cache, "X-Tile-Kept": "0", "X-Attribution": "cuzk-ortho"})
+                        headers={"Cache-Control": LIVE, "X-Attribution": "cuzk-ortho"})
 
     @app.get("/t/{rid}/osm/{z}/{x}/{y}.mvt")
     async def osm_tile(rid: str, z: int, x: int, y: int, request: Request):

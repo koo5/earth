@@ -1,5 +1,5 @@
-"""The orthophoto: fetched from ČÚZK on first ask (faked here at ortho.fetch), kept as it came,
-404 outside Czechia without asking, and its attribution with the release's year."""
+"""The orthophoto: asked of the ortho service every time (faked here at ortho.fetch), never kept, what it
+cost charged to the make bucket, 404 outside Czechia without asking, and its attribution with the year."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,6 +7,7 @@ from earth import app as app_mod, limits, ortho, store
 from conftest import tile_of
 
 JPEG = b"\xff\xd8\xff\xe0" + b"x" * 100
+COST: dict = {}                                                # what the ortho service says a tile cost
 CHURCH = tile_of(50.18723, 14.661822, 18)
 
 
@@ -18,22 +19,38 @@ def svc(tmp_path, monkeypatch):
 
     def fetch(z, x, y):
         asked.append((z, x, y))
-        return None if (z, x, y) == (18, 1, 1) else (JPEG, "image/jpeg")
+        return None if (z, x, y) == (18, 1, 1) else (JPEG, "image/jpeg", COST.get((z, x, y), 0))
     monkeypatch.setattr(ortho, "fetch", fetch)
     s = store.Store()
     s.register("ortho-a", "ortho", {"year": "2024-2025"}, "test", mode="live")
     return TestClient(app_mod.create_app(store=s, limits=limits.Limits())), asked
 
 
-def test_a_tile_is_fetched_once_and_kept_as_it_came(svc):
+def test_a_tile_is_passed_on_as_it_came_and_never_kept(svc):
     c, asked = svc
     z, x, y = CHURCH
-    r = c.get(f"/t/ortho-a/ortho/{z}/{x}/{y}.jpg")
-    assert r.status_code == 200 and r.content == JPEG and r.headers["content-type"] == "image/jpeg"
-    assert r.headers["x-tile-kept"] == "0" and r.headers["x-attribution"] == "cuzk-ortho"
-    again = c.get(f"/t/ortho-a/ortho/{z}/{x}/{y}.jpg")
-    assert again.headers["x-tile-kept"] == "1" and again.content == JPEG and asked == [CHURCH]
-    assert again.headers["cache-control"] == app_mod.LIVE
+    for _ in range(2):
+        r = c.get(f"/t/ortho-a/ortho/{z}/{x}/{y}.jpg")
+        assert r.status_code == 200 and r.content == JPEG and r.headers["content-type"] == "image/jpeg"
+        assert r.headers["x-attribution"] == "cuzk-ortho" and r.headers["cache-control"] == app_mod.LIVE
+    assert asked == [CHURCH, CHURCH]                               # the ortho service caches, not earth
+
+
+def test_what_a_tile_cost_is_charged_and_an_address_in_debt_waits(tmp_path, monkeypatch):
+    monkeypatch.delenv("EARTH_NO_LIMITS", raising=False)
+    monkeypatch.setenv("EARTH_STORE", str(tmp_path / "store"))
+    monkeypatch.setenv("EARTH_LIMIT_MAKE_RATE", "0.001")
+    monkeypatch.setenv("EARTH_LIMIT_MAKE_BURST", "3")
+    cheap, dear = tile_of(50.1, 14.4, 17), tile_of(50.2, 14.5, 17)
+    monkeypatch.setattr(ortho, "fetch", lambda z, x, y: (JPEG, "image/jpeg", 5 if (z, x, y) == dear else 0))
+    s = store.Store()
+    s.register("ortho-a", "ortho", {"year": "2024-2025"}, "test", mode="live")
+    c = TestClient(app_mod.create_app(store=s, limits=limits.Limits()))
+    for _ in range(10):                                            # cached tiles cost nothing made
+        assert c.get("/t/ortho-a/ortho/{}/{}/{}.jpg".format(*cheap)).status_code == 200
+    assert c.get("/t/ortho-a/ortho/{}/{}/{}.jpg".format(*dear)).status_code == 200    # 3 - 5: in debt
+    r = c.get("/t/ortho-a/ortho/{}/{}/{}.jpg".format(*cheap))
+    assert r.status_code == 429 and int(r.headers["retry-after"]) > 1
 
 
 def test_outside_czechia_and_where_cuzk_has_none_is_404_and_not_kept(svc):

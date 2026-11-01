@@ -18,6 +18,10 @@ import sheets as S
 APP_DIR = "/app"
 TEMPLATES = Path(__file__).parent / "templates"
 MAPSERV_BIN = "/usr/lib/cgi-bin/mapserv"
+# zooms 18-20 are drawn from the sheets each time and never stored: stored, they would outweigh the sheets
+# (~350 MB of tiles per 75 MB sheet); zooms 15-17 are ~5 MB a sheet. wsgi.py sends them to this layer.
+DIRECT_FROM_ZOOM = 18
+DIRECT_LAYER = "oi_direct"
 
 
 @dataclass
@@ -36,6 +40,7 @@ class Config:
     sheets_url: str
     fetch_jobs: int
     budget_bytes: int
+    min_free_bytes: int
     ov_min_sheets: int
     ov_quiet_s: float
     ov_max_age_s: float
@@ -58,8 +63,10 @@ class Config:
             # ČÚZK's open-data sheets, <id>.zip; a file:// directory works too (the tests)
             sheets_url=os.environ.get("SHEETS_URL", "https://openzu.cuzk.gov.cz/opendata/OI"),
             fetch_jobs=int(os.environ.get("FETCH_JOBS", "4")),
-            # ~450 GB is ~6,000 sheets, ~30% of Czechia (a 1 TB server's share)
+            # ~450 GB is ~6,000 sheets, ~30% of Czechia (a 1 TB server's share); past it nothing is fetched
             budget_bytes=int(float(os.environ.get("SHEET_BUDGET_GB", "450")) * 1e9),
+            # and nothing either once the disk's free space is below this (the disk is shared)
+            min_free_bytes=int(float(os.environ.get("MIN_FREE_GB", "50")) * 1e9),
             ov_min_sheets=int(os.environ.get("OV_MIN_SHEETS", "8")),
             ov_quiet_s=float(os.environ.get("OV_QUIET_S", "300")),
             ov_max_age_s=float(os.environ.get("OV_MAX_AGE_S", "3600")),
@@ -109,21 +116,27 @@ def write_mapproxy(cfg: Config) -> None:
     # WMTS only, and the app takes only its REST GetTile (wsgi.py): every detail tile must pass the sheet
     # fetch first, so no other route may render one (WMS, the demo, TMS and KVP GetTile would draw it with
     # sheets missing and cache that for good)
+    tiles = {
+        "format": "mixed",              # JPEG for opaque tiles, PNG where transparent
+        "request_format": "image/png",  # request alpha so mixed can decide per tile
+        "grids": ["webmercator"],
+        "sources": ["oi_src"],
+        # tile by tile: a metatile would make one first view fetch every sheet under 4 x 4 tiles
+        "meta_size": [1, 1],
+        "meta_buffer": 0,
+    }
     doc = {
         "services": {"wmts": {"kvp": False, "restful": True}},
-        "layers": [{"name": "oi", "title": "Ortofoto CR 0.125m", "sources": ["oi_cache"]}],
+        "layers": [{"name": "oi", "title": "Ortofoto CR 0.125m", "sources": ["oi_cache"]},
+                   {"name": DIRECT_LAYER, "title": "Ortofoto CR 0.125m, zooms 18+", "sources": ["oi_direct"]}],
         "caches": {
             "oi_cache": {
-                "format": "mixed",              # JPEG for opaque tiles, PNG where transparent
-                "request_format": "image/png",  # request alpha so mixed can decide per tile
-                "grids": ["webmercator"],
-                "sources": ["oi_src"],
-                # tile by tile: a metatile would make one first view fetch every sheet under 4 x 4 tiles
-                "meta_size": [1, 1],
-                "meta_buffer": 0,
+                **tiles,
                 # a known layout, so the overview can drop exactly the tiles a new sheet changes
                 "cache": {"type": "file", "directory": cfg.tile_cache, "directory_layout": "tms"},
             },
+            # the same tiles, drawn every time and never stored (DIRECT_FROM_ZOOM)
+            "oi_direct": {**tiles, "disable_storage": True},
         },
         "sources": {
             "oi_src": {

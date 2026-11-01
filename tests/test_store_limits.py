@@ -49,6 +49,17 @@ def test_buckets_refill_at_their_rate_and_cap_at_their_burst():
     assert [b.take("a") for _ in range(4)][-1] > 0    # refilled to the burst, not beyond
 
 
+def test_a_charge_after_the_fact_can_go_into_debt_and_the_debtor_waits():
+    now = [0.0]
+    b = limits.Buckets(rate=2, burst=3, clock=lambda: now[0])
+    assert b.owed("a") == 0
+    b.charge("a", 5)                                  # 3 - 5: two tokens owed
+    assert b.owed("a") == pytest.approx(1.0)          # at 2 a second
+    assert b.take("a") == pytest.approx(1.5)          # and nothing else passes meanwhile
+    now[0] = 1.0
+    assert b.owed("a") == 0
+
+
 def test_buckets_forget_the_least_recent_client():
     b = limits.Buckets(rate=1, burst=1, max_keys=2, clock=lambda: 0.0)
     b.take("a"), b.take("b"), b.take("c")

@@ -1,4 +1,4 @@
-"""The orthophoto: ČÚZK Ortofoto ČR, fetched on first ask, kept, and served as it came.
+"""The orthophoto: ČÚZK Ortofoto ČR from the stack's ortho service, passed on as it came, never kept.
 
 ČÚZK publishes it as open data under CC BY 4.0 since 2023-07-01 (metadata record
 CZ-CUZK-ORTOFOTO-R: "Licence Creative Commons CC BY 4.0", "Bez poplatků"), 12.5 cm pixels,
@@ -7,12 +7,13 @@ renewed in a two-year cycle, half the country a year. The upstream is the stack'
 slippy z/x/y as the terrain tiles, so a terrain tile drapes the ortho tile of the same address.
 The terms (cuzk.gov.cz, Podmínky poskytování prostorových dat ČÚZK) ask that a viewing service
 names the source as "ČÚZK, <year>", links to the terms, and travels with the metadata;
-attribution.py carries that. The bytes are kept as the ortho service sent them (JPEG, PNG
-where it holds no sheet): reprojected and cut into tiles, the imagery itself not modified.
+attribution.py carries that. The bytes go out as the ortho service sent them (JPEG, PNG where it
+holds no sheet): reprojected and cut into tiles, the imagery itself not modified. The ortho service
+says what each tile cost (X-Ortho-Cost: sheets fetched, a tile drawn); earth charges it (limits.py).
 
 Czechia only for now: a tile outside the service's extent is a 404 without asking upstream.
-Upstream changes yearly, so an ortho release is `live` unless the operator freezes what it has
-kept; the year it shows is the release's own (`sources.year`).
+An ortho release is `live`: the imagery changes as ČÚZK renews it; the year it shows is the release's
+own (`sources.year`).
 """
 from __future__ import annotations
 
@@ -27,7 +28,8 @@ EXTENT_3857 = (1321579.96, 6141009.24, 2130407.22, 6694506.48)
 MAX_Z = int(os.getenv("EARTH_ORTHO_MAX_Z", "20"))
 TIMEOUT_S = float(os.getenv("EARTH_ORTHO_TIMEOUT_S", "20"))
 USER_AGENT = os.getenv("EARTH_USER_AGENT", "earth.hillview.cz (https://hillview.cz)")
-# how many tiles may be asked of ČÚZK at once, whoever asks: a public service of theirs
+# how many tiles may be asked of the ortho service at once, whoever asks: as many as it has workers
+# (its WORKERS); more would only queue there
 _upstream = threading.Semaphore(int(os.getenv("EARTH_ORTHO_UPSTREAM_CONCURRENT", "4")))
 
 _HALF = 20037508.342789244
@@ -69,17 +71,20 @@ def upstream() -> str:
     return url
 
 
-def fetch(z: int, x: int, y: int) -> tuple[bytes, str] | None:
-    """The upstream tile as (bytes, media type), or None where it has none. OrthoError when
-    asking failed, so the caller answers it and keeps nothing."""
+def fetch(z: int, x: int, y: int) -> tuple[bytes, str, float] | None:
+    """The upstream tile as (bytes, media type, what it cost in tiles made), or None where it has
+    none. OrthoError when asking failed, so the caller answers it."""
     req = urllib.request.Request(upstream().format(z=z, x=x, y=y), headers={"User-Agent": USER_AGENT})
     with _upstream:
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
-                body = r.read()
+                body, cost = r.read(), r.headers.get("X-Ortho-Cost")
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return None
+            if e.code == 503:                       # its sheet storage is full: passed on as it said it
+                detail = e.read()[:300].decode(errors="replace")
+                raise OrthoError(503, f"orthophoto {z}/{x}/{y} unavailable: {detail}")
             raise OrthoError(502, f"the ortho service answered {e.code} for ortho {z}/{x}/{y}")
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise OrthoError(503, f"the ortho service is unreachable for ortho {z}/{x}/{y}: "
@@ -88,4 +93,6 @@ def fetch(z: int, x: int, y: int) -> tuple[bytes, str] | None:
     if mt is None:
         raise OrthoError(502, f"the ortho service sent something not an image for ortho {z}/{x}/{y} "
                               f"({len(body)} B)")
-    return body, mt
+    if cost is None:
+        raise OrthoError(502, f"the ortho service did not say what ortho {z}/{x}/{y} cost (X-Ortho-Cost)")
+    return body, mt, float(cost)

@@ -13,9 +13,10 @@ names the data relative to the checkout):
     store/      releases, channels, kept tiles, osm/, models/, grids/
     ortho/      the ortho service: sheets/ (JP2, fetched as needed), state/ (index, overview), cache/
 
-`~/earth/src/deploy/.env` (mode 600, never committed) holds the one secret:
+`~/earth/src/deploy/.env` (mode 600, never committed) holds the two secrets:
 
-    EARTH_PREFIX=<openssl rand -hex 24>   # the secret path prefix: https://earth.hillview.cz/<prefix>/...
+    EARTH_PREFIX=<openssl rand -hex 24>       # earth's path prefix until it opens: https://earth.hillview.cz/<prefix>/...
+    EARTH_DEM_PREFIX=<openssl rand -hex 24>   # the terrain mosaics' own path, secret for good
 
 Deploy: `cd ~/earth/src && git pull --ff-only && cd deploy && podman compose up -d --build` (earth, ortho and
 Caddy; the builder is a one-shot, `podman compose run --rm builder`). At boot `podman-restart.service`

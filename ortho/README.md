@@ -2,8 +2,8 @@
 
 Serves the Czech national orthophoto (ČÚZK Ortofoto ČR, INSPIRE theme **OI**, 12.5 cm, CC BY 4.0)
 as Web Mercator tiles, rendered from ČÚZK's original JPEG2000 sheets. It holds none of them at
-first: a sheet is fetched from ČÚZK's open-data endpoint the first time a tile needs it, and the
-least recently used go when the disk budget is reached. It is earth's orthophoto upstream
+first: a sheet is fetched from ČÚZK's open-data endpoint the first time a tile needs it, and kept for
+good; when the disk budget is reached, fetching stops (more storage is the answer, not eviction). It is earth's orthophoto upstream
 (`EARTH_ORTHO_URL`, the compose service `ortho`), reachable only from earth's network. It began as
 a tile server that held all ~1.5 TB of sheets.
 
@@ -32,16 +32,17 @@ a tile server that held all ~1.5 TB of sheets.
   per sheet so two requests fetch it once. The sidecars are published first and the `.jp2` last by
   an atomic rename, so a reader never sees half a sheet. A sheet that is not there (404) is not
   retried; another failure is, up to four tries.
-- **Rendering:** a detail tile is drawn only while every sheet under it is on disk and held (a
-  shared lock per sheet). A first view of an area waits for its sheets (seconds); a sheet that
-  cannot be fetched is a 502, never a tile drawn with a hole that the cache would keep.
+- **Rendering:** a detail tile is drawn only once every sheet under it is on disk. A first view of
+  an area waits for its sheets (seconds); a sheet that cannot be fetched is a 502 and a full store a
+  503, never a tile drawn with a hole that the cache would keep.
 - **The index** MapServer reads is `/state/sheets.csv` (each held sheet's path and its 2 km square),
-  rewritten atomically on every change. `/state/sheets.sqlite` records each sheet's size, arrival,
-  last use and whether the overview has it yet. At start the record follows the disk.
-- **Eviction:** past `SHEET_BUDGET_GB` the least recently used sheets go, down to 90% of it. A sheet
-  waits for the renders holding it; one the overview has not taken yet stays.
-- **Updates:** a held sheet stays as it was fetched until it is evicted; ČÚZK's newer imagery of it
-  is not fetched again.
+  rewritten atomically on every change. `/state/sheets.sqlite` records each sheet's size, arrival
+  and whether the overview has it yet. At start the record follows the disk.
+- **Full:** no sheet is ever deleted, so none is downloaded twice. Once the sheets reach
+  `SHEET_BUDGET_GB`, or the disk's free space falls below `MIN_FREE_GB` (the disk is shared), nothing
+  more is fetched: a tile that needs a sheet not held is a 503, `/status` says `"full": true`, and
+  what is held still serves. A few fetches in flight may pass the line together.
+- **Updates:** a held sheet stays as it was fetched; ČÚZK's newer imagery of it is not fetched again.
 
 ## The overview (zooms below 15)
 
@@ -50,7 +51,7 @@ scale denominator) MapServer draws from one 4 m mosaic of Czechia instead. It is
 the first start, empty and sparse (122000 × 70500 px, with its pyramid): until sheets arrive the
 low zooms are transparent. Fetched sheets are warped into it in place, and only their extents of
 the pyramid are refreshed (`gdaladdo --partial-refresh-from-source-extent`). Then the cached tiles
-of the overview zooms over them are deleted. An evicted sheet keeps its overview pixels.
+of the overview zooms over them are deleted.
 
 Never per sheet: an update runs when at least `OV_MIN_SHEETS` sheets wait and none arrived for
 `OV_QUIET_S` (a burst of browsing settles first), or when the oldest has waited `OV_MAX_AGE_S`
@@ -69,13 +70,21 @@ exists, or the overview has none yet (its alpha band), is transparent. The cache
 `format: mixed`: JPEG for an opaque tile (~36 KB at zoom 16), PNG where any pixel is transparent.
 The `.png` in the URL is only a path; the `Content-Type` says which.
 
+## The tile cache
+
+MapProxy keeps tiles up to zoom 17 in `/cache/oi` (~5 MB per sheet at zooms 15-17). Zooms 18-20 are
+drawn from the sheets each time and never stored: stored, they would come to ~350 MB per 75 MB sheet.
+Every tile answers `X-Ortho-Cost`: the sheets fetched for it plus 1 if it was drawn rather than taken
+from the cache. This service sees only earth, which charges that cost to the client who asked
+(`../earth/limits.py`).
+
 ## Endpoints (port 8080)
 
 | what | URL |
 |---|---|
 | a tile | `/wmts/oi/webmercator/{z}/{x}/{y}.png` |
 | WMTS capabilities | `/wmts/1.0.0/WMTSCapabilities.xml` |
-| state: sheets held, bytes, budget, overview queue, detail zoom | `/status` (JSON) |
+| state: sheets held, bytes, budget, whether full, overview queue, detail zoom | `/status` (JSON) |
 | a Leaflet viewer | `/map` |
 
 That tile route is the only one that renders. MapProxy's WMS, demo, TMS and WMTS KVP are not
@@ -88,7 +97,8 @@ fetching its sheets and cache it for good. Any other `/wmts/` path is a 404.
 |---|---|---|
 | `SHEETS_URL` | `https://openzu.cuzk.gov.cz/opendata/OI` | where `<id>.zip` is fetched from (a `file://` directory works: the tests) |
 | `FETCH_JOBS` | `4` | sheets fetched at once by one request |
-| `SHEET_BUDGET_GB` | `450` | disk for held sheets (~6,000, ~30% of Czechia) |
+| `SHEET_BUDGET_GB` | `450` | disk for held sheets (~6,000, ~30% of Czechia); past it nothing is fetched |
+| `MIN_FREE_GB` | `50` | and nothing either while the disk has less free than this |
 | `OV_MIN_SHEETS`, `OV_QUIET_S`, `OV_MAX_AGE_S` | `8`, `300`, `3600` | the overview's hysteresis |
 | `OV_THREADS` | `2` | gdalwarp threads for an overview update |
 | `OV_RES` | `4` | the overview's resolution, metres |
@@ -114,10 +124,10 @@ The compose service `ortho` in `../deploy/compose.yml`, with `/data`, `/state` a
 |---|---|
 | `app/entrypoint.py` | check the crossover, reconcile the held sheets, write the configs, start the maintainer, serve |
 | `app/sheets.py` | sheet ids, boxes, the sheets under a tile, the detail zoom |
-| `app/store.py` | fetching, holding, the index, the record, eviction |
+| `app/store.py` | fetching, the index, the record, the budget |
 | `app/overview.py` | the hysteresis, creating and updating the overview, the cached tiles to drop |
 | `app/serve.py` | the maintainer thread and the gunicorn child |
-| `app/wsgi.py` | `/map`, `/status`, and the tile route behind the sheet fetch |
+| `app/wsgi.py` | `/map`, `/status`, and the tile route behind the sheet fetch, with its cost |
 | `app/config.py` | the environment, and the one source of the mapfile and `mapproxy.yaml` |
 | `app/build.py` | GDAL steps with progress lines, and the build lock |
 | `app/templates/oi.map.tmpl` | the MapServer mapfile |

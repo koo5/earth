@@ -55,9 +55,19 @@ def update(cfg, jp2s: list[str]) -> None:
                  cfg.overview], f"overview pyramid refresh ({len(jp2s)} sheets)")
 
 
+# MapProxy's file cache with the 'tms' layout (config.write_mapproxy) keeps tile z/x/y at {z}/{x}/{y}.mixed:
+# a `format: mixed` cache names its files .mixed, and GLOBAL_WEBMERCATOR's origin is the north-west, so its
+# rows count from the north, as XYZ's do (seen on the server: cache/oi/16/35436/22173.mixed for 16/35436/22173)
+CACHE_EXT = "mixed"
+
+
+def cache_file(cache_dir: str, z: int, x: int, y: int) -> Path:
+    """Where MapProxy's file cache keeps the XYZ tile z/x/y, if it does."""
+    return Path(cache_dir) / str(z) / str(x) / f"{y}.{CACHE_EXT}"
+
+
 def cached_tiles(cache_dir: str, sids: list[str], below_zoom: int) -> list[Path]:
-    """The cache files of zooms < below_zoom that overlap these sheets: MapProxy's file cache with the
-    'tms' layout (config.write_mapproxy), {cache_dir}/{z}/{x}/{y}.{jpeg|png}, y counted from the south."""
+    """The cache files of zooms < below_zoom that overlap these sheets (cache_file)."""
     from pyproj import Transformer
     to_3857 = Transformer.from_crs("EPSG:25833", "EPSG:3857", always_xy=True)
     out = []
@@ -66,11 +76,10 @@ def cached_tiles(cache_dir: str, sids: list[str], below_zoom: int) -> list[Path]
         for z in range(below_zoom):
             size = 2 * S.HALF / 2 ** z
             x0, x1 = int((minx + S.HALF) // size), int((maxx + S.HALF) // size)
-            ys0, ys1 = int((miny + S.HALF) // size), int((maxy + S.HALF) // size)   # tms rows: from the south
+            y0, y1 = int((S.HALF - maxy) // size), int((S.HALF - miny) // size)     # rows from the north
             for x in range(x0, x1 + 1):
-                for y in range(ys0, ys1 + 1):
-                    for ext in ("jpeg", "png"):
-                        out.append(Path(cache_dir) / str(z) / str(x) / f"{y}.{ext}")
+                for y in range(y0, y1 + 1):
+                    out.append(cache_file(cache_dir, z, x, y))
     return out
 
 

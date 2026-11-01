@@ -15,11 +15,11 @@ path prefix (`https://earth.hillview.cz/<prefix>/...`, `deploy/README.md`).
 | `GET /releases/{id}` | what a release is made from (the mosaics' stamp, the archive, the areas, the generator) |
 | `GET /t/{release}/terrain/{surface\|bare}/{z}/{x}/{y}.{q16\|f32}` | a terrain tile: 65 × 65 ellipsoidal heights and a source byte per sample (`earth/tiles.py`) |
 | `POST /t/{release}/terrain/ground` | the ground at points or over a box, with a status per point (`ok`, `not_fetched`, `outside`, …); orthometric, as the models give it (`earth/ground.py`) |
-| `GET /t/{release}/ortho/{z}/{x}/{y}.jpg` | ČÚZK Ortofoto ČR (CC BY 4.0), 12.5 cm; asked of the upstream on first request and kept as it came; Czechia only (`earth/ortho.py`) |
+| `GET /t/{release}/ortho/{z}/{x}/{y}.jpg` | ČÚZK Ortofoto ČR (CC BY 4.0), 12.5 cm, from the ortho service as it came, never kept here; Czechia only (`earth/ortho.py`) |
 | `GET /t/{release}/osm/{z}/{x}/{y}.mvt` | OpenStreetMap (ODbL) as vector tiles from the release's PMTiles archive: buildings, walls, roads, water with raw tags and `osm_id`, zoom 13-15; 204 for empty ground (`earth/osm.py`) |
 | `GET /t/{release}/models/manifest.json`, `.../models/assets/{sha256}.glb` | IPR Praha's 3D buildings (2020, CC BY 4.0) as GLB meshes with ellipsoidal heights, prepared ahead by area and served only as the release's manifest names them; Prague only (`earth/citymodels.py`) |
 | `GET /attribution` | what each source requires shown; each tile names its own in `X-Attribution` |
-| `GET /dem/...` | the terrain mosaics themselves, read-only, for GDAL's `/vsicurl/` (served by Caddy, not earth) |
+| `GET /<dem secret>/...` | the terrain mosaics themselves, read-only, for GDAL's `/vsicurl/`: served by Caddy under a secret path of their own (`deploy/Caddyfile`), not by earth |
 
 A client reads its channel once and then asks only for release URLs. A frozen release never
 changes, so its tiles are `Cache-Control: immutable`. Terrain tiles are made the first time they
@@ -41,8 +41,8 @@ that earth's ortho layer asks (`EARTH_ORTHO_URL`). It holds none of ČÚZK's 20,
 (2 × 2 km, ~1.5 TB in all) until a view needs them. From zoom 15 a tile is drawn from the sheets
 under it, fetched from ČÚZK's open-data endpoint on that first request (seconds); below zoom 15,
 from a 4 m overview of Czechia that fetched sheets are warped into in batches. A batch waits for a
-quiet spell or an hour, never one per sheet. Sheets are evicted by last use past a disk budget
-(450 GB). `EARTH_ORTHO_URL` names it; there is no other upstream.
+quiet spell or an hour, never one per sheet. A sheet is kept for good; at the disk budget (450 GB)
+fetching stops. `EARTH_ORTHO_URL` names it; there is no other upstream.
 
 **OSM**: `osm/build.sh` runs planetiler with `osm/hillview-map.yml` over Geofabrik's Czech extract
 into one `.pmtiles`.
@@ -86,7 +86,9 @@ the mosaics, keeps its tiles per mosaic stamp, and is never served as immutable.
 ## Limits
 
 Each IP has two token buckets: reads of kept tiles, and makes of new ones. On top of that, a
-cap limits how many makes run at once (`earth/limits.py`). The settings are
+cap limits how many makes run at once (`earth/limits.py`). An orthophoto tile is a read, and what
+the ortho service says it cost (sheets fetched, a tile drawn) is charged to the make bucket after it;
+an address in debt waits. The settings are
 `EARTH_LIMIT_{READ,MAKE}_{RATE,BURST}`, `EARTH_LIMIT_MAKE_CONCURRENT` and `EARTH_NO_LIMITS=1`.
 `X-Forwarded-For` is believed only from `EARTH_TRUSTED_PROXIES` (the proxy in front).
 

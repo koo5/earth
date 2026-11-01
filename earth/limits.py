@@ -6,6 +6,9 @@
 2. MAKES are expensive -- a tile cut from the mosaics: a small bucket per IP
    (EARTH_LIMIT_MAKE_RATE / EARTH_LIMIT_MAKE_BURST), and a cap on makes running at once across
    everyone (EARTH_LIMIT_MAKE_CONCURRENT, default the core count: making is CPU and disk).
+3. Work only the UPSTREAM can price -- an orthophoto tile is cheap from the ortho service's cache and
+   dear when it fetched sheets for it: charged to the same make bucket AFTER the answer, with what
+   the upstream says it cost. The bucket may go into debt; while it owes, that address is refused.
 
 Past a limit: 429 with Retry-After, and a client keeps the coarser tile it already has.
 
@@ -47,24 +50,43 @@ class Buckets:
         self._b: OrderedDict[str, Bucket] = OrderedDict()
         self._lock = threading.Lock()
 
+    def _bucket(self, key: str) -> Bucket:
+        """The client's bucket, refilled to now. Under self._lock."""
+        now = self.clock()
+        b = self._b.get(key)
+        if b is None:
+            b = Bucket(self.burst, now)
+            self._b[key] = b
+            if len(self._b) > self.max_keys:
+                self._b.popitem(last=False)
+        else:
+            self._b.move_to_end(key)
+            b.tokens = min(self.burst, b.tokens + (now - b.t) * self.rate)
+            b.t = now
+        return b
+
+    def _wait(self, b: Bucket, need: float) -> float:
+        return (need - b.tokens) / self.rate if self.rate > 0 else math.inf
+
     def take(self, key: str, cost: float = 1.0) -> float:
         """0 when allowed (and the tokens are spent), else the seconds until it would be."""
-        now = self.clock()
         with self._lock:
-            b = self._b.get(key)
-            if b is None:
-                b = Bucket(self.burst, now)
-                self._b[key] = b
-                if len(self._b) > self.max_keys:
-                    self._b.popitem(last=False)
-            else:
-                self._b.move_to_end(key)
-                b.tokens = min(self.burst, b.tokens + (now - b.t) * self.rate)
-                b.t = now
+            b = self._bucket(key)
             if b.tokens >= cost:
                 b.tokens -= cost
                 return 0.0
-            return (cost - b.tokens) / self.rate if self.rate > 0 else math.inf
+            return self._wait(b, cost)
+
+    def owed(self, key: str) -> float:
+        """0 unless the client is in debt (charge), else the seconds until it is not."""
+        with self._lock:
+            b = self._bucket(key)
+            return 0.0 if b.tokens >= 0 else self._wait(b, 0.0)
+
+    def charge(self, key: str, cost: float) -> None:
+        """Spend `cost` after the fact, into debt if need be."""
+        with self._lock:
+            self._bucket(key).tokens -= cost
 
 
 def client_ip(request: Request) -> str:
@@ -102,3 +124,18 @@ class Limits:
         """One tile made costs 1; other work says what it costs in tiles (a ground query: its
         points over a tile's 4,225)."""
         self._check(self.make, request, "tiles to make", cost)
+
+    def check_owed(self, request: Request) -> None:
+        """Before work only the upstream can price: refused while the address owes makes."""
+        if config.no_limits():
+            return
+        wait = self.make.owed(client_ip(request))
+        if wait:
+            raise HTTPException(429, f"too many tiles made for this address; retry in {math.ceil(wait)} s",
+                                headers={"Retry-After": str(max(1, math.ceil(wait)))})
+
+    def charge_make(self, request: Request, cost: float) -> None:
+        """After it: what the upstream said the work cost, in tiles."""
+        if config.no_limits() or cost <= 0:
+            return
+        self.make.charge(client_ip(request), cost)

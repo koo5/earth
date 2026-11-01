@@ -18,12 +18,13 @@ def main() -> int:
     zoom = S.detail_zoom(cfg.crossover)          # refuses a crossover that splits a zoom level
     print(f"[start] config: data={cfg.data_dir} state={cfg.state_dir} cache={cfg.cache_dir} "
           f"port={cfg.port} workers={cfg.workers} sheets={len(known)} from {cfg.sheets_url}; "
-          f"detail (sheets fetched) from zoom {zoom}; budget {cfg.budget_bytes / 1e9:.0f} GB; "
+          f"detail (sheets fetched) from zoom {zoom}; budget {cfg.budget_bytes / 1e9:.0f} GB, "
+          f"{cfg.min_free_bytes / 1e9:.0f} GB kept free; "
           f"overview after {cfg.ov_min_sheets} sheets + {cfg.ov_quiet_s:.0f} s quiet, "
           f"or {cfg.ov_max_age_s:.0f} s", flush=True)
     cfg.ensure_dirs()
     write_mapserver_conf(cfg)
-    Store(cfg.data_dir, cfg.state_dir, cfg.sheets_url, cfg.fetch_jobs).reconcile(known)
+    Store.of(cfg).reconcile(known)
     write_mapfile(cfg, known)
     write_mapproxy(cfg)
     start_maintainer(cfg, known)

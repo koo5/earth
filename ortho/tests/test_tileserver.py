@@ -6,7 +6,7 @@ import subprocess
 
 from PIL import Image
 
-from helpers import CLI, CONTAINER, FIXTURE_TILE, TILE_CENTER, deg2tile, http
+from helpers import CLI, CONTAINER, FIXTURE_TILE, TILE_CENTER, deg2tile, http, http_full
 
 
 def _alpha_range(body):
@@ -64,6 +64,25 @@ def test_interior_highzoom_is_opaque_jpeg(fetched):
     assert status == 200
     assert ctype == "image/jpeg", f"opaque interior tile should be JPEG (mixed), got {ctype}"
     assert _alpha_range(body) == (255, 255), "interior tile must be fully opaque"
+
+
+def test_each_tile_says_what_it_cost(fetched):
+    x16, y16 = fetched                                      # drawn and cached by the fixture
+    status, headers, _ = http_full(f"/wmts/oi/webmercator/16/{x16}/{y16}.png")
+    assert status == 200 and headers["X-Ortho-Cost"] == "0"
+    x, y = deg2tile(*TILE_CENTER, 17)                       # its sheet held, the tile not drawn yet
+    assert http_full(f"/wmts/oi/webmercator/17/{x}/{y}.png")[1]["X-Ortho-Cost"] == "1"
+    assert http_full(f"/wmts/oi/webmercator/17/{x}/{y}.png")[1]["X-Ortho-Cost"] == "0"
+
+
+def test_zoom_18_is_drawn_each_time_and_never_stored(fetched):
+    x, y = deg2tile(*TILE_CENTER, 18)
+    for _ in range(2):
+        status, headers, _ = http_full(f"/wmts/oi/webmercator/18/{x}/{y}.png")
+        assert status == 200 and headers["Content-Type"] == "image/jpeg" and headers["X-Ortho-Cost"] == "1"
+    r = subprocess.run([CLI, "exec", CONTAINER, "find", "/cache", "-type", "f"], capture_output=True, text=True)
+    files = r.stdout.split()
+    assert any("/oi/17/" in f for f in files) and not any(f"/18/{x}/" in f for f in files), files
 
 
 def test_lowzoom_overview_has_the_sheet_and_transparency_round_it(overview_ready):

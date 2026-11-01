@@ -1,32 +1,36 @@
 # Caddy in front of earth on earth.hillview.cz (compose.yml). It runs on the host network: it sees each
 # client's real address and reaches earth on the published loopback port.
 #
-# NOT PUBLIC YET: only /<EARTH_PREFIX>/... reaches earth, with the prefix
-# stripped, so clients use https://earth.hillview.cz/<EARTH_PREFIX> as their base. Everything else is
-# a 404. The API hands out release ids, never URLs, so nothing it says leaks or misses the prefix.
-# No access log: it would write the prefix down.
+# NOT PUBLIC YET: only /<EARTH_PREFIX>/... reaches earth, with the prefix stripped, so clients use
+# https://earth.hillview.cz/<EARTH_PREFIX> as their base. The terrain mosaics have a secret path of their
+# own, /<EARTH_DEM_PREFIX>/..., which stays secret when earth opens. Everything else is a 404. The API
+# hands out release ids, never URLs, so nothing it says leaks or misses a prefix. No access log: it would
+# write the prefixes down.
 (earth) {
-	handle_path /{$EARTH_PREFIX}/* {
-		# The terrain mosaics as plain files, for clients that read them themselves with GDAL range
-		# requests (/vsicurl/, e.g. a depth renderer): only what earth itself
-		# reads, never the LAZ downloads or the S-JTSK intermediates. Read-only, no listings, and not
-		# re-compressed (the sheets are DEFLATE tiles, and a range read wants the bytes as stored).
-		handle_path /dem/* {
-			@served path /cuzk/*.vrt /cuzk/warp/* /glo30.vrt /glo30/* /global/* /geoid/*
-			handle @served {
-				root * /srv/dem
-				file_server
-			}
-			handle {
-				respond 404
-			}
+	# The terrain mosaics as plain files, for a client that reads them itself with GDAL range requests
+	# (/vsicurl/, e.g. a depth renderer): only what earth itself reads, never the LAZ downloads or the
+	# S-JTSK intermediates. Read-only, no listings, and not re-compressed (the sheets are DEFLATE tiles,
+	# and a range read wants the bytes as stored). Hundreds of GB, unmetered: hence a secret of its own.
+	handle_path /{$EARTH_DEM_PREFIX}/* {
+		@served path /cuzk/*.vrt /cuzk/warp/* /glo30.vrt /glo30/* /global/* /geoid/*
+		handle @served {
+			root * /srv/dem
+			file_server
 		}
 		handle {
-			encode zstd gzip
-			# Caddy SETS X-Forwarded-For to the client it sees (it does not pass on one the client
-			# sent), so the service can believe it from here and nowhere else (limits.client_ip)
-			reverse_proxy 127.0.0.1:8090
+			respond 404
 		}
+	}
+	handle_path /{$EARTH_PREFIX}/* {
+		# the largest real request is a ground query of 20,000 points (~1 MB); earth parses a body
+		# before its limits can see it
+		request_body {
+			max_size 2MB
+		}
+		encode zstd gzip
+		# Caddy SETS X-Forwarded-For to the client it sees (it does not pass on one the client sent),
+		# so the service can believe it from here and nowhere else (limits.client_ip)
+		reverse_proxy 127.0.0.1:8090
 	}
 	handle {
 		respond 404
@@ -38,7 +42,9 @@ earth.hillview.cz {
 }
 
 # The same routes in plain HTTP on the server's loopback only, for a tunnel while 80/443 are closed.
-# Nothing outside the server reaches it.
+# `bind`: a site address names the Host it answers, not the interface; without it the port listens on
+# every interface and a client could send that Host from outside.
 http://127.0.0.1:8081 {
+	bind 127.0.0.1
 	import earth
 }

@@ -19,8 +19,7 @@ APP_DIR = "/app"
 
 
 def maintain_once(cfg, store: Store, known, now: float | None = None) -> None:
-    """One pass: the overview takes the waiting sheets when the hysteresis says so; past the budget the
-    least recently used sheets go (down to 90% of it)."""
+    """One pass: the overview takes the waiting sheets when the hysteresis says so."""
     now = time.time() if now is None else now
     pending = store.pending_overview()
     if overview.due(pending, now, cfg.ov_min_sheets, cfg.ov_quiet_s, cfg.ov_max_age_s):
@@ -31,11 +30,10 @@ def maintain_once(cfg, store: Store, known, now: float | None = None) -> None:
                 dropped = overview.drop_cached(cfg.tile_cache, ids, S.detail_zoom(cfg.crossover))
                 print(f"[overview] took {len(ids)} sheets; {dropped} cached low-zoom tiles dropped", flush=True)
             store.mark_overview([sid for sid, _ in pending])
-    store.evict(cfg.budget_bytes, int(cfg.budget_bytes * 0.9))
 
 
 def _maintain(cfg, known) -> None:
-    store = Store(cfg.data_dir, cfg.state_dir, cfg.sheets_url, cfg.fetch_jobs)
+    store = Store.of(cfg)
     try:
         with build_lock(cfg):
             overview.create(cfg, known)          # once: low zoom is transparent until then
