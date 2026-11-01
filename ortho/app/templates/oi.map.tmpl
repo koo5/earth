@@ -1,0 +1,67 @@
+MAP
+  NAME "oi"
+  EXTENT $minx $miny $maxx $maxy
+  SIZE 256 256
+  IMAGETYPE "png"
+  UNITS METERS
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGBA
+    EXTENSION "png"
+  END
+  PROJECTION
+    "init=$srs_lower"
+  END
+  WEB
+    METADATA
+      "wms_title"          "CUZK Ortofoto"
+      "wms_srs"            "$srs"
+      "wms_enable_request" "*"
+    END
+  END
+
+  # The sheets held on disk: store.py rewrites this index as sheets arrive and leave.
+  # One row per sheet, its location and its exact 2 km square; OGR reads the CSV, nothing reads a JP2.
+  LAYER
+    NAME "oi_index"
+    TYPE POLYGON
+    STATUS OFF
+    CONNECTIONTYPE OGR
+    CONNECTION "$index"
+    DATA "sheets"
+    PROJECTION
+      "init=$srs_lower"
+    END
+  END
+
+  # Detail: the full-res JP2 sheets, drawn when zoomed in (scale denom < crossover). The app fetches every
+  # sheet a detail tile needs before this layer draws it (wsgi.py).
+  LAYER
+    NAME "oi"
+    TYPE RASTER
+    STATUS ON
+    MAXSCALEDENOM $crossover
+    TILEINDEX "oi_index"
+    TILEITEM "location"
+    PROCESSING "RESAMPLE=BILINEAR"
+    PROJECTION
+      "init=$srs_lower"
+    END
+  END
+
+  # Overview: ${ov_res} m mosaic with alpha + pyramid, drawn when zoomed out
+  # (scale denom >= crossover) to avoid opening thousands of JP2s per tile.
+  LAYER
+    NAME "oi_ov"
+    TYPE RASTER
+    STATUS ON
+    MINSCALEDENOM $crossover
+    DATA "$overview"
+    PROCESSING "RESAMPLE=AVERAGE"
+    PROJECTION
+      "init=$srs_lower"
+    END
+  END
+END

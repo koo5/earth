@@ -1,0 +1,10 @@
+# The image only COPYs requirements.txt and app/ (see Dockerfile).
+# Exclude everything, then re-include exactly what the build needs — keeps the
+# context tiny (no .git, tests, etc.).
+*
+!app/
+!requirements.txt
+
+# ...but never ship Python caches from the kept paths.
+**/__pycache__/
+*.pyc

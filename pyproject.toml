@@ -1,0 +1,37 @@
+[project]
+name = "earth"
+version = "0.1.0"
+description = "hillview's public geodata service: terrain tiles (and later OSM, orthophoto, point clouds) by release and channel"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139",
+    "uvicorn[standard]>=0.50",
+    "numpy>=2.5",
+    "rasterio>=1.5",
+    "pyproj>=3.8",
+    "pmtiles>=3.8.1",
+]
+
+[project.scripts]
+earth = "earth.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1",
+    "httpx>=0.28",
+]
+
+[tool.uv]
+# the 14-day dependency cooloff the other hillview repos keep: nothing published after this date
+# resolves. Move it forward deliberately (it is a date, not a window).
+exclude-newer = "2026-09-29T00:00:00Z"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["earth"]

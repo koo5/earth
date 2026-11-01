@@ -1,0 +1,6 @@
+[Unit]
+Description=restart earth's unhealthy containers (deploy/heal-unhealthy.sh)
+
+[Service]
+Type=oneshot
+ExecStart=%h/earth/src/deploy/heal-unhealthy.sh

@@ -1,0 +1,140 @@
+# The map layer earth serves (/t/{release}/osm/{z}/{x}/{y}.mvt): exactly the OSM hillview's 3D world
+# draws, as its Overpass query selected it. Raw tags, not a cartographic schema:
+# the consumer decides what a building's height is, so the tags it reads travel as they are.
+#
+# One layer per kind, every feature with its OSM id (`osm_id`, way or relation) -- the 3D models
+# layer links by it. Zoom 15 is the finest; buildings and walls keep
+# a wide buffer so a building near an edge is whole in each tile it touches, as Overpass's `out geom`
+# gave whole ways.
+#
+# Build: osm/build.sh. Licence: ODbL ("© OpenStreetMap contributors"); the PMTiles archive is a
+# derivative database.
+schema_name: hillview map
+schema_description: OSM buildings, roads, walls and water with their raw tags, for the 3D world
+attribution: '<a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>'
+args:
+  area:
+    description: Geofabrik area to download
+    default: czech-republic
+  maxzoom: 15
+  minzoom: 13
+sources:
+  osm:
+    type: osm
+    url: '${ "geofabrik:" + args.area }'
+    local_path: '${ "/data/sources/" + args.area + ".osm.pbf" }'
+layers:
+- id: building
+  buffer: 64
+  features:
+  - source: osm
+    geometry: polygon
+    min_zoom: 14
+    include_when:
+      building: __any__
+    min_size: 0
+    min_size_at_max_zoom: 0
+    tolerance_at_max_zoom: 0.0625
+    attributes:
+    - key: osm_id
+      value: '${ feature.id }'
+    - key: building
+      tag_value: building
+    - key: height
+      tag_value: height
+    - key: building:height
+      tag_value: building:height
+    - key: building:levels
+      tag_value: building:levels
+    - key: name
+      tag_value: name
+- id: wall
+  buffer: 64
+  features:
+  - source: osm
+    geometry: line
+    min_zoom: 14
+    include_when:
+      barrier: retaining_wall
+    min_size: 0
+    attributes:
+    - key: osm_id
+      value: '${ feature.id }'
+    - key: barrier
+      tag_value: barrier
+- id: road
+  buffer: 16
+  features:
+  - source: osm
+    geometry: line
+    min_zoom: 13
+    include_when:
+      highway:
+      - primary
+      - secondary
+      - tertiary
+      - residential
+      - pedestrian
+      - living_street
+      - unclassified
+      - service
+      - track
+      - footway
+      - path
+      - cycleway
+    min_size: 0
+    attributes:
+    - key: osm_id
+      value: '${ feature.id }'
+    - key: highway
+      tag_value: highway
+    - key: name
+      tag_value: name
+- id: water
+  buffer: 16
+  features:
+  - source: osm
+    geometry: polygon
+    min_zoom: 13
+    include_when:
+      natural: water
+    min_size: 0
+    attributes:
+    - key: osm_id
+      value: '${ feature.id }'
+    - key: natural
+      tag_value: natural
+    - key: water
+      tag_value: water
+    - key: name
+      tag_value: name
+  - source: osm
+    geometry: polygon
+    min_zoom: 13
+    include_when:
+      waterway: riverbank
+    min_size: 0
+    attributes:
+    - key: osm_id
+      value: '${ feature.id }'
+    - key: waterway
+      tag_value: waterway
+    - key: name
+      tag_value: name
+  - source: osm
+    geometry: line
+    min_zoom: 13
+    include_when:
+      waterway:
+      - river
+      - stream
+      - canal
+      - ditch
+    min_size: 0
+    attributes:
+    - key: osm_id
+      value: '${ feature.id }'
+    - key: waterway
+      tag_value: waterway
+    - key: name
+      tag_value: name

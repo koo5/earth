@@ -1,0 +1,9 @@
+[Unit]
+Description=every minute: restart earth's unhealthy containers
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

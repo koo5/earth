@@ -1,0 +1,102 @@
+# earth.hillview.cz: rootless Podman, `podman compose` with docker compose as the provider;
+# deploy/README.md has the layout, the .env, the boot restart and heal-unhealthy.sh. The data
+# directories are siblings of this checkout: ../../{dem,store,ortho}.
+#
+# Rootless: the containers' root IS the deploying user, so earth and the builder run as 0:0 and what
+# they write stays that user's. Caddy runs on the HOST network: it sees each client's real address (rootless Podman's port
+# forwarding does not pass it on) and reaches earth on the published loopback port. It SETS
+# X-Forwarded-For to the address it sees; earth believes that header only from EARTH_TRUSTED_PROXIES,
+# 172.30.0.3: earth's own address, which is where rootless Podman's port forwarder delivers from (the
+# port is published on loopback only, so what arrives that way came through Caddy).
+#
+# The DEM mosaics are read-only to earth; the store (releases, channels, kept tiles) is its own.
+services:
+  earth:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    restart: always
+    user: "0:0"
+    environment:
+      EARTH_TRUSTED_PROXIES: 172.30.0.3
+      # the orthophoto: the ortho service below (earth/ortho.py)
+      EARTH_ORTHO_URL: http://ortho:8080/wmts/oi/webmercator/{z}/{x}/{y}.png
+      # a first view of an area waits for its sheets (~3.5 s each, several at once)
+      EARTH_ORTHO_TIMEOUT_S: 120
+    ports: ["127.0.0.1:8090:8000"]
+    cpus: 5
+    mem_limit: 12g
+    volumes:
+      - ../../dem:/dem:ro
+      - ../../store:/var/lib/earth
+    networks: { earth: { ipv4_address: 172.30.0.3 } }
+    healthcheck:
+      # the shell form: Podman re-splits an exec-form healthcheck's arguments on spaces, and python
+      # then got only "import" (2026-11-01)
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=10)\""]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    labels: { earth.heal: restart }
+  ortho:
+    # ČÚZK's orthophoto from its open JP2 sheets, each fetched when a detail tile first needs it, with a 4 m
+    # overview filled in as they arrive (../ortho). Only earth talks to it, on this network; nothing is
+    # published.
+    build: { context: ../ortho }
+    restart: always
+    cpus: 3
+    mem_limit: 6g
+    environment:
+      SHEET_BUDGET_GB: 450
+    volumes:
+      - ../../ortho/sheets:/data
+      - ../../ortho/state:/state
+      - ../../ortho/cache:/cache
+    networks: [earth]
+    # here, not only in its Dockerfile: Podman builds OCI images, which carry no HEALTHCHECK
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/wmts/1.0.0/WMTSCapabilities.xml > /dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    labels: { earth.heal: restart }
+  caddy:
+    # 2.11.7 released 2026-10-03 (cooloff); this image pushed 2026-10-30
+    image: docker.io/library/caddy:2.11.7@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e
+    restart: always
+    network_mode: host
+    environment:
+      # not public yet: only /<EARTH_PREFIX>/... reaches earth (./Caddyfile)
+      EARTH_PREFIX: ${EARTH_PREFIX:?set EARTH_PREFIX (a long random string) in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../dem:/srv/dem:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels: { earth.heal: restart }
+  builder:
+    # one-shot: everything earth's terrain reads, built into the DEM dir from the sources (builder/build_all.sh).
+    # `podman compose run --rm builder [bbox] [layer]`. Incremental, so a rerun resumes; never part of `up`.
+    profiles: [build]
+    build: { context: .., dockerfile: deploy/builder.Dockerfile }
+    user: "0:0"
+    # sheets at once (build_mosaic.py --jobs): 5 of the server's 6 vCPUs, one left for earth itself
+    environment:
+      BUILD_JOBS: 5
+    cpus: 5
+    mem_limit: 8g
+    volumes:
+      - ../../dem:/dem
+    network_mode: bridge
+networks:
+  earth:
+    ipam: { config: [{ subnet: 172.30.0.0/24, gateway: 172.30.0.1 }] }
+volumes:
+  caddy_data:
+  caddy_config:

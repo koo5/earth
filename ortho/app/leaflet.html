@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ČÚZK Ortofoto</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>html,body,#map{height:100%;margin:0}</style>
+</head>
+<body>
+  <div id="map"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Keep this in lockstep with MapProxy's grid (num_levels: 21 → z0–20).
+    // z20 ≈ 0.096 m/px lands just past the native 0.125 m source; z21+ is interpolation.
+    const MP_MAX_ZOOM = 20;
+    const DEFAULT = { lat: 50.2044, lng: 12.2393, zoom: 17 };  // near Aš/Cheb
+
+    // Restore view from the URL hash (#zoom/lat/lon, OSM-style) if present.
+    function parseHash() {
+      const m = location.hash.match(/^#(\d{1,2}(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/);
+      return m ? { zoom: +m[1], lat: +m[2], lng: +m[3] } : null;
+    }
+    const start = parseHash() || DEFAULT;
+    const map = L.map('map', { maxZoom: MP_MAX_ZOOM }).setView([start.lat, start.lng], start.zoom);
+
+    // Base context layer: the tile server public hillview uses
+    L.tileLayer('https://tiles4.ueueeu.eu/tile/{z}/{x}/{y}.png', {
+      maxZoom: MP_MAX_ZOOM, attribution: 'Map data © OpenStreetMap contributors'
+    }).addTo(map);
+
+    // ČÚZK orthophoto via MapProxy (Web Mercator XYZ). Relative when this page is
+    // served by the container (works from any host); absolute when opened from disk.
+    const MP = location.protocol === 'file:' ? 'http://localhost:8080' : '';
+    L.tileLayer(MP + '/wmts/oi/webmercator/{z}/{x}/{y}.png', {
+      maxZoom: MP_MAX_ZOOM, maxNativeZoom: MP_MAX_ZOOM, tileSize: 256, attribution: '© ČÚZK'
+    }).addTo(map);
+
+    // Sync map state into the URL hash — reload-safe and shareable.
+    // replaceState (not location.hash=) avoids spamming browser history.
+    function updateHash() {
+      const c = map.getCenter();
+      history.replaceState(null, '', `#${map.getZoom()}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`);
+    }
+    map.on('moveend', updateHash);
+    updateHash();
+    // Honour manual edits / back-forward navigation of the hash.
+    addEventListener('hashchange', () => {
+      const h = parseHash();
+      if (h) map.setView([h.lat, h.lng], h.zoom);
+    });
+  </script>
+</body>
+</html>
