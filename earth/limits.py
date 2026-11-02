@@ -9,6 +9,10 @@
 3. Work only the UPSTREAM can price -- an orthophoto tile is cheap from the ortho service's cache and
    dear when it fetched sheets for it: charged to the same make bucket AFTER the answer, with what
    the upstream says it cost. The bucket may go into debt; while it owes, that address is refused.
+   Asks of the ortho service in flight are capped per address (EARTH_LIMIT_ORTHO_PER_ADDRESS) under a
+   cap across everyone (EARTH_LIMIT_ORTHO_CONCURRENT, what the ortho service serves at once): a tile
+   whose sheets are still downloading takes a minute or two, and with one shared cap of 4 a single
+   viewer's new area held every other viewer's cached tiles for 170 s (recon pl03, 2026-11-02).
 
 Past a limit: 429 with Retry-After, and a client keeps the coarser tile it already has.
 
@@ -23,6 +27,7 @@ second worker would need it shared (Redis).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 import os
 import threading
@@ -101,6 +106,28 @@ def client_ip(request: Request) -> str:
     return fwd.strip()
 
 
+class AddressSlots:
+    """At most `n` at once per address; more wait their turn (not refused: a view asks for its tiles all at
+    once). Waiting is on the event loop, holding no thread. An address's entry goes when it has nothing in
+    flight or waiting, so addresses seen once leave nothing behind."""
+
+    def __init__(self, n: int):
+        self.n = max(1, n)
+        self._held: dict[str, list] = {}           # address -> [its semaphore, asks in flight or waiting]
+
+    @contextlib.asynccontextmanager
+    async def hold(self, address: str):
+        e = self._held.setdefault(address, [asyncio.Semaphore(self.n), 0])
+        e[1] += 1
+        try:
+            async with e[0]:
+                yield
+        finally:
+            e[1] -= 1
+            if e[1] == 0:
+                del self._held[address]
+
+
 class Limits:
     def __init__(self):
         self.read = Buckets(config.limit("READ_RATE", 100), config.limit("READ_BURST", 1000))
@@ -108,6 +135,9 @@ class Limits:
         n = int(config.limit("MAKE_CONCURRENT", os.cpu_count() or 4))
         self.making = asyncio.Semaphore(max(1, n))
         self.making_n = max(1, n)
+        # the ortho service: 4 workers x 8 threads there (ortho/app/config.py), some left for the overview
+        self.ortho_address = AddressSlots(int(config.limit("ORTHO_PER_ADDRESS", 4)))
+        self.ortho_upstream = asyncio.Semaphore(max(1, int(config.limit("ORTHO_CONCURRENT", 24))))
 
     def _check(self, buckets: Buckets, request: Request, what: str, cost: float = 1.0) -> None:
         if config.no_limits():

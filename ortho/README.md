@@ -106,7 +106,7 @@ fetching its sheets and cache it for good. Any other `/wmts/` path is a 404.
 | `MAINTAIN_S` | `30` | the maintainer's pass interval |
 | `DATA_DIR`, `STATE_DIR`, `CACHE_DIR` | `/data`, `/state`, `/cache` | sheets; index, record and overview; MapProxy's tiles |
 | `LOCK_DIR`, `TILE_LOCK_DIR` | `/tmp/mapproxy/locks`, `/tmp/mapproxy/tile_locks` | MapProxy's locks, outside the cache (below) |
-| `WORKERS`, `PORT` | `4`, `8080` | gunicorn |
+| `WORKERS`, `THREADS`, `PORT` | `4`, `8`, `8080` | gunicorn (gthread): a tile waiting for its sheet holds a thread, not a worker |
 | `SRS` | `EPSG:25833` | the sheets' CRS |
 | `BUILD_LOG_INTERVAL` | `15` | seconds between progress lines of a long GDAL step |
 

@@ -37,7 +37,8 @@ ENV DATA_DIR=/data \
     OV_RES=4 \
     CROSSOVER=16000 \
     BUILD_LOG_INTERVAL=15 \
-    WORKERS=4
+    WORKERS=4 \
+    THREADS=8
 
 COPY app/ /app/
 # MapServer 8 loads a mapfile by path only when it matches this gate; the entrypoint writes the mapfile to

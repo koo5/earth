@@ -20,11 +20,9 @@ def svc(tmp_path, monkeypatch):
     monkeypatch.setenv("EARTH_STORE", str(tmp_path / "store"))
     asked = []
 
-    def fetch(z, x, y, before, charge):
-        before()
+    def fetch(z, x, y):
         asked.append((z, x, y))
-        charge(0)
-        return None if (z, x, y) == (18, 1, 1) else (JPEG, "image/jpeg")
+        return None if (z, x, y) == (18, 1, 1) else (JPEG, "image/jpeg", 0.0)
     monkeypatch.setattr(ortho, "fetch", fetch)
     s = store.Store()
     s.register("ortho-a", "ortho", {"year": "2024-2025"}, "test", mode="live")
@@ -57,13 +55,16 @@ class Upstream:
 
 @pytest.fixture
 def limited(tmp_path, monkeypatch):
-    """The app with limits on (make burst 3, no refill to speak of), one upstream slot, urlopen faked."""
+    """The app with limits on (make burst 3, no refill to speak of), one ortho slot per address and two in
+    all, urlopen faked. An address is X-Forwarded-For from the test client, which is made the trusted proxy."""
     monkeypatch.delenv("EARTH_NO_LIMITS", raising=False)
     monkeypatch.setenv("EARTH_STORE", str(tmp_path / "store"))
     monkeypatch.setenv("EARTH_ORTHO_URL", "http://ortho/{z}/{x}/{y}")
     monkeypatch.setenv("EARTH_LIMIT_MAKE_RATE", "0.001")
     monkeypatch.setenv("EARTH_LIMIT_MAKE_BURST", "3")
-    monkeypatch.setattr(ortho, "_upstream", threading.Semaphore(1))
+    monkeypatch.setenv("EARTH_LIMIT_ORTHO_PER_ADDRESS", "1")
+    monkeypatch.setenv("EARTH_LIMIT_ORTHO_CONCURRENT", "2")
+    monkeypatch.setenv("EARTH_TRUSTED_PROXIES", "testclient")
     s = store.Store()
     s.register("ortho-a", "ortho", {"year": "2024-2025"}, "test", mode="live")
 
@@ -82,8 +83,15 @@ def limited(tmp_path, monkeypatch):
             def read(self):
                 return self.body.read()
         monkeypatch.setattr(ortho.urllib.request, "urlopen", Response)
-        return TestClient(app_mod.create_app(store=s, limits=limits.Limits()))
-    return use
+        # entered: its requests share one event loop, as uvicorn's do (the ortho slots are asyncio
+        # semaphores; outside the context each request would run on a loop of its own)
+        c = TestClient(app_mod.create_app(store=s, limits=limits.Limits()))
+        clients.append(c.__enter__())
+        return c
+    clients: list = []
+    yield use
+    for c in clients:
+        c.__exit__(None, None, None)
 
 
 CHEAP, DEAR = tile_of(50.1, 14.4, 17), tile_of(50.2, 14.5, 17)
@@ -109,7 +117,7 @@ def test_a_second_dear_tile_in_flight_is_refused_once_the_first_is_charged(limit
     first = threading.Thread(target=lambda: got.append(c.get(url(DEAR)).status_code))
     got: list = []
     first.start()
-    assert up.entered.wait(5)                                      # the first holds the one slot
+    assert up.entered.wait(5)                                      # the first holds the address's one slot
     second = threading.Thread(target=lambda: got.append(c.get(url((DEAR[0], DEAR[1] + 1, DEAR[2]))).status_code))
     second.start()
     time.sleep(0.3)                                                # it is in, waiting for the slot (or past a check)
@@ -117,6 +125,25 @@ def test_a_second_dear_tile_in_flight_is_refused_once_the_first_is_charged(limit
     first.join(5)
     second.join(5)
     assert sorted(got) == [200, 429]
+
+
+def test_one_address_waiting_on_new_sheets_does_not_hold_another_address_cached_tile(limited):
+    """A viewer's new area (tiles waiting minutes for their sheets) held every other viewer's cached tiles
+    behind one shared cap of 4: 170 s on earth.hillview.cz, 2026-11-02 (recon pl03)."""
+    gate = threading.Event()
+    up = Upstream({}, gate)
+    c = limited(up)
+    slow: list = []
+    a = threading.Thread(target=lambda: slow.append(c.get(url(DEAR), headers={"X-Forwarded-For": "10.0.0.1"})))
+    a.start()
+    assert up.entered.wait(5)                                      # 10.0.0.1 holds its slot, waiting upstream
+    up.gate = None                                                 # what follows answers at once
+    t = time.monotonic()
+    r = c.get(url(CHEAP), headers={"X-Forwarded-For": "10.0.0.2"})
+    assert r.status_code == 200 and time.monotonic() - t < 2 and not slow
+    gate.set()
+    a.join(5)
+    assert slow[0].status_code == 200
 
 
 def test_a_cost_that_is_not_a_finite_count_is_the_upstreams_fault(limited):

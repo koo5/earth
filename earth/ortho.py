@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import math
 import os
-import threading
-from collections.abc import Callable
 import urllib.error
 import urllib.request
 
@@ -30,9 +28,6 @@ EXTENT_3857 = (1321579.96, 6141009.24, 2130407.22, 6694506.48)
 MAX_Z = int(os.getenv("EARTH_ORTHO_MAX_Z", "20"))
 TIMEOUT_S = float(os.getenv("EARTH_ORTHO_TIMEOUT_S", "20"))
 USER_AGENT = os.getenv("EARTH_USER_AGENT", "earth.hillview.cz (https://hillview.cz)")
-# how many tiles may be asked of the ortho service at once, whoever asks: as many as it has workers
-# (its WORKERS); more would only queue there
-_upstream = threading.Semaphore(int(os.getenv("EARTH_ORTHO_UPSTREAM_CONCURRENT", "4")))
 
 _HALF = 20037508.342789244
 
@@ -73,35 +68,30 @@ def upstream() -> str:
     return url
 
 
-def fetch(z: int, x: int, y: int, before: Callable[[], None],
-          charge: Callable[[float], None]) -> tuple[bytes, str] | None:
-    """The upstream tile as (bytes, media type), or None where it has none. OrthoError when asking
-    failed, so the caller answers it. `before` (refuse an address in debt) runs once this request
-    holds an upstream slot, and `charge` (what the ortho service says the tile cost) before it lets
-    the slot go: so a request checked after another finished sees that one's charge, and an address
-    has at most the slots in flight past its check, not its whole read burst."""
+def fetch(z: int, x: int, y: int) -> tuple[bytes, str, float] | None:
+    """The upstream tile as (bytes, media type, what the ortho service says it cost), or None where it
+    has none. OrthoError when asking failed, so the caller answers it. The caller holds the slots and
+    charges the cost (app.py ortho_tile, limits.py)."""
     req = urllib.request.Request(upstream().format(z=z, x=x, y=y), headers={"User-Agent": USER_AGENT})
-    with _upstream:
-        before()
-        try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
-                body, cost = r.read(), r.headers.get("X-Ortho-Cost")
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return None
-            if e.code == 503:                       # its sheet storage is full: passed on as it said it
-                detail = e.read()[:300].decode(errors="replace")
-                raise OrthoError(503, f"orthophoto {z}/{x}/{y} unavailable: {detail}")
-            raise OrthoError(502, f"the ortho service answered {e.code} for ortho {z}/{x}/{y}")
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            raise OrthoError(503, f"the ortho service is unreachable for ortho {z}/{x}/{y}: "
-                                  f"{getattr(e, 'reason', e)}")
-        charge(_cost(cost, z, x, y))
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+            body, cost = r.read(), r.headers.get("X-Ortho-Cost")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        if e.code == 503:                           # its sheet storage is full: passed on as it said it
+            detail = e.read()[:300].decode(errors="replace")
+            raise OrthoError(503, f"orthophoto {z}/{x}/{y} unavailable: {detail}")
+        raise OrthoError(502, f"the ortho service answered {e.code} for ortho {z}/{x}/{y}")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise OrthoError(503, f"the ortho service is unreachable for ortho {z}/{x}/{y}: "
+                              f"{getattr(e, 'reason', e)}")
+    price = _cost(cost, z, x, y)
     mt = media_type(body)
     if mt is None:
         raise OrthoError(502, f"the ortho service sent something not an image for ortho {z}/{x}/{y} "
                               f"({len(body)} B)")
-    return body, mt
+    return body, mt, price
 
 
 def _cost(header: str | None, z: int, x: int, y: int) -> float:

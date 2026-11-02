@@ -36,6 +36,7 @@ class Config:
     tile_lock_dir: str
     port: int
     workers: int
+    threads: int
     srs: str
     ov_res: int
     crossover: int
@@ -60,6 +61,9 @@ class Config:
             tile_lock_dir=os.environ.get("TILE_LOCK_DIR", "/tmp/mapproxy/tile_locks"),
             port=int(os.environ.get("PORT", "8080")),
             workers=int(os.environ.get("WORKERS", "4")),
+            # per worker: a tile waiting for its sheet holds a thread, not the worker, so cached tiles keep
+            # flowing while a new area downloads (4 sync workers held them for minutes: recon pl03, 11-02)
+            threads=int(os.environ.get("THREADS", "8")),
             srs=os.environ.get("SRS", "EPSG:25833"),
             ov_res=int(os.environ.get("OV_RES", "4")),
             crossover=int(os.environ.get("CROSSOVER", "16000")),

@@ -53,7 +53,10 @@ def start_maintainer(cfg, known) -> None:
 
 def run_server(cfg) -> int:
     # gunicorn on wsgi.py, never MapProxy's own server: that one would render detail tiles past the sheet fetch
-    cmd = ["gunicorn", "-b", f"0.0.0.0:{cfg.port}", "-w", str(cfg.workers), "--timeout", "120", "wsgi:application"]
+    # gthread: the timeout is the worker's heartbeat, not the request, so a tile that waits minutes for its
+    # sheet no longer gets its worker killed at 120 s (the 502s of recon pl03)
+    cmd = ["gunicorn", "-b", f"0.0.0.0:{cfg.port}", "-w", str(cfg.workers), "-k", "gthread",
+           "--threads", str(cfg.threads), "--timeout", "120", "wsgi:application"]
     print(f"[start] serving on :{cfg.port}  "
           "XYZ: /wmts/oi/webmercator/{z}/{x}/{y}.png  viewer: /map",
           flush=True)
