@@ -15,8 +15,10 @@ names the data relative to the checkout):
 
 `~/earth/src/deploy/.env` (mode 600, never committed) holds the two path prefixes:
 
-    EARTH_PREFIX=<tr -dc a-z0-9 </dev/urandom | head -c 8>   # earth's base, https://earth.hillview.cz/<prefix>/...
-    EARTH_DEM_PREFIX=<openssl rand -hex 24>                  # the terrain mosaics' own path, secret for good
+    EARTH_PREFIX=<8 random [a-z0-9]>          # earth's base, https://earth.hillview.cz/<prefix>/...
+    EARTH_DEM_PREFIX=<openssl rand -hex 24>   # the terrain mosaics' own path, secret for good
+
+    python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8)))'
 
 EARTH_PREFIX is fixed and goes into the clients' config, so it is public to anyone who looks at a client.
 What it keeps out is the scanners that find the host: anything outside it has its connection closed,
