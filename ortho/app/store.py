@@ -7,16 +7,23 @@ fetching stops and a tile that needs a sheet not held is refused; more storage i
   last by an atomic rename, so a reader never sees half a sheet.
 - MapServer finds the held sheets through a tile index, sheets.csv (location + its exact 2 km square as WKT,
   read by OGR's CSV driver), rewritten atomically on every change. Nothing reads a JP2 to index it.
-- sheets.sqlite records each sheet's size, arrival and whether the overview has it yet.
+- sheets.sqlite records each sheet's size, arrival and whether the overview has it yet; how long recent
+  downloads took (the Retry-After a waiting tile is given), and the sheets whose download failed lately.
+- A tile never waits for its sheets on the request (begin): their downloads start in the background and the
+  tile is answered "come back in N s" at once (recon pl04: a request that held a worker for minutes held
+  every cached tile behind it, and gunicorn killed it at 120 s).
 """
 from __future__ import annotations
 
 import contextlib
 import fcntl
+import math
 import os
 import shutil
 import sqlite3
+import statistics
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -35,6 +42,13 @@ class StoreFull(RuntimeError):
     """The budget is reached or the disk is nearly full: no sheet is fetched any more."""
 
 
+# a sheet whose download failed answers that failure for this long before it is tried again (in every worker:
+# the failure is recorded in sheets.sqlite), so a sheet ČÚZK does not have is a 502, not a 503 for ever
+FAIL_HOLD_S = 300
+# Retry-After for a waiting tile: the median of recent downloads, times the queue ahead of it here
+RETRY_MIN_S, RETRY_MAX_S, RETRY_FIRST_S = 5, 120, 20
+
+
 class Store:
     def __init__(self, data_dir: str, state_dir: str, sheets_url: str, fetch_jobs: int,
                  budget_bytes: int, min_free_bytes: int):
@@ -49,6 +63,12 @@ class Store:
         with self._db() as con:
             con.execute("CREATE TABLE IF NOT EXISTS sheets (id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, "
                         "arrived REAL NOT NULL, in_overview INTEGER NOT NULL DEFAULT 0)")
+            con.execute("CREATE TABLE IF NOT EXISTS downloads (id TEXT NOT NULL, seconds REAL NOT NULL, at REAL NOT NULL)")
+            con.execute("CREATE TABLE IF NOT EXISTS failures (id TEXT PRIMARY KEY, kind TEXT NOT NULL, "
+                        "detail TEXT NOT NULL, at REAL NOT NULL)")
+        self._queued: set[str] = set()                  # this process's background downloads, queued or running
+        self._queued_lock = threading.Lock()
+        self._pool: ThreadPoolExecutor | None = None
 
     @classmethod
     def of(cls, cfg) -> "Store":
@@ -79,6 +99,71 @@ class Store:
         stopped: a detail tile is never drawn with a sheet missing."""
         missing = [s for s in sorted(set(ids)) if not self.jp2(s).exists()]
         return len(self.fetch(missing)) if missing else 0
+
+    def begin(self, ids: list[str]) -> tuple[int, int] | None:
+        """None when every sheet in `ids` is on disk. Otherwise the missing ones are downloading in the
+        background, started here unless one already is (in this worker or another, by its lock), and the
+        answer is (how many this call started, seconds to come back). SheetMissing when one failed in the
+        last FAIL_HOLD_S, StoreFull when fetching has stopped: never a tile drawn with a sheet missing."""
+        missing = [s for s in sorted(set(ids)) if not self.jp2(s).exists()]
+        if not missing:
+            return None
+        with self._db() as con:
+            q = ",".join("?" * len(missing))
+            failed = con.execute(f"SELECT id, kind, detail FROM failures WHERE id IN ({q}) AND at > ?",
+                                 (*missing, time.time() - FAIL_HOLD_S)).fetchone()
+        if failed:
+            raise (StoreFull if failed[1] == "full" else SheetMissing)(failed[2])
+        if self.full():
+            raise StoreFull(f"sheet storage full ({self.held_bytes() / 1e9:.0f} GB held, budget "
+                            f"{self.budget / 1e9:.0f} GB): {', '.join(missing)} not fetched")
+        started = 0
+        for sid in missing:
+            with self._queued_lock:
+                if sid in self._queued or self._in_flight(sid):
+                    continue
+                self._queued.add(sid)
+            if self._pool is None:
+                self._pool = ThreadPoolExecutor(max(1, self.jobs), thread_name_prefix="sheets")
+            self._pool.submit(self._background, sid)
+            started += 1
+        return started, self.retry_after()
+
+    def retry_after(self) -> int:
+        """Seconds a waiting tile is told to come back in: the median of the last downloads, times the
+        queue in this worker over its parallel downloads."""
+        with self._db() as con:
+            recent = [r[0] for r in con.execute("SELECT seconds FROM downloads ORDER BY at DESC LIMIT 9")]
+        each = statistics.median(recent) if recent else RETRY_FIRST_S
+        rounds = math.ceil(max(1, len(self._queued)) / max(1, self.jobs))
+        return int(min(RETRY_MAX_S, max(RETRY_MIN_S, math.ceil(each * rounds))))
+
+    def _in_flight(self, sid: str) -> bool:
+        """Whether another worker holds the sheet's lock: it is downloading it."""
+        with open(self.data / ".locks" / f"{sid}.lock", "a") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            return False
+
+    def _background(self, sid: str) -> None:
+        t = time.time()
+        try:
+            if self.ensure([sid]):
+                with self._db() as con:
+                    con.execute("INSERT INTO downloads (id, seconds, at) VALUES (?, ?, ?)", (sid, time.time() - t, time.time()))
+                    con.execute("DELETE FROM failures WHERE id = ?", (sid,))
+        except Exception as e:  # noqa: BLE001 -- recorded for the next ask of it, in any worker
+            kind = "full" if isinstance(e, StoreFull) else "missing"
+            with self._db() as con:
+                con.execute("INSERT OR REPLACE INTO failures (id, kind, detail, at) VALUES (?, ?, ?, ?)",
+                            (sid, kind, str(e)[:500], time.time()))
+            print(f"[sheets] {sid} failed: {e}", flush=True)
+        finally:
+            with self._queued_lock:
+                self._queued.discard(sid)
 
     def full(self) -> bool:
         """At the budget, or the disk's free space below the reserve (it is shared with the rest of earth)."""

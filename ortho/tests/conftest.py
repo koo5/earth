@@ -13,7 +13,7 @@ import zipfile
 import pytest
 
 from helpers import (BASE, CLI, CONTAINER, FIXTURE_TILE, IMAGE, PORT, ROOT,
-                     TILE_CENTER, deg2tile, http)
+                     TILE_CENTER, deg2tile, http, http_full)
 
 
 def _sh(*args):
@@ -82,9 +82,18 @@ def server():
 
 @pytest.fixture(scope="session")
 def fetched(server):
-    """A detail tile asked once: the container fetches the fixture sheet."""
+    """A detail tile asked until it is drawn: the first ask starts the fixture sheet's download and is a 503
+    at once, with Retry-After and the download it started as its cost; the client comes back."""
     x, y = deg2tile(*TILE_CENTER, 16)
-    status, _, body = http(f"/wmts/oi/webmercator/16/{x}/{y}.png", timeout=120)
+    status, headers, body = http_full(f"/wmts/oi/webmercator/16/{x}/{y}.png", timeout=10)
+    assert status == 503 and 5 <= int(headers["Retry-After"]) <= 120, (status, body[:300])
+    assert headers["X-Ortho-Cost"] == "1"
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        status, headers, body = http_full(f"/wmts/oi/webmercator/16/{x}/{y}.png", timeout=10)
+        if status != 503:
+            break
+        time.sleep(1)
     assert status == 200, body[:300]
     return x, y
 

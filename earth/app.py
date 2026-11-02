@@ -216,7 +216,9 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
             try:
                 got = await run_in_threadpool(ortho.fetch, z, x, y)
             except ortho.OrthoError as e:
-                raise HTTPException(e.status, e.detail)
+                lim().charge_make(request, e.cost)         # a 503 for a tile still downloading: what it started
+                raise HTTPException(e.status, e.detail,
+                                    headers={"Retry-After": e.retry_after} if e.retry_after else None)
             if got is None:
                 raise HTTPException(404, f"no orthophoto at {z}/{x}/{y}")
             body, mt, cost = got

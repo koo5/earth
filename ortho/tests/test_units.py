@@ -179,6 +179,65 @@ def test_a_disk_short_of_the_reserve_stops_fetching_too(store):
         store.ensure(["602_5554"])
 
 
+def settle(store):
+    """Wait for the store's background downloads (begin), as a client's retry would."""
+    if store._pool is not None:
+        store._pool.shutdown(wait=True)
+        store._pool = None
+
+
+def test_begin_downloads_in_the_background_once_and_then_the_tile_is_ready(store):
+    gate = threading.Event()
+    original = store.ensure
+    store.ensure = lambda ids: (gate.wait(5), original(ids))[1]
+    started, after = store.begin(["602_5554", "604_5554"])
+    assert started == 2 and 5 <= after <= 120               # answered at once, not after the download
+    assert not store.jp2("602_5554").exists()
+    assert store.begin(["602_5554"]) == (0, after)          # in flight already: none started again
+    gate.set()
+    settle(store)
+    assert store.begin(["602_5554", "604_5554"]) is None    # held: drawn now
+    with store._db() as con:
+        assert con.execute("SELECT COUNT(*) FROM downloads").fetchone()[0] == 2
+
+
+def test_a_sheet_downloading_in_another_worker_is_not_started_again(store):
+    with store.lock("602_5554"):                            # another worker holds it: downloading
+        assert store.begin(["602_5554"])[0] == 0
+    assert store.begin(["602_5554"])[0] == 1
+    settle(store)
+
+
+def test_a_failed_download_is_a_502_for_every_worker_for_a_while_then_tried_again(store, monkeypatch):
+    import store as store_mod
+    assert store.begin(["608_5554"])[0] == 1                # not on the server at all
+    settle(store)
+    other = Store(str(store.data), str(store.state), store.url, 1, store.budget, store.min_free)
+    with pytest.raises(SheetMissing, match="608_5554"):     # another worker reads the same record
+        other.begin(["608_5554"])
+    monkeypatch.setattr(store_mod, "FAIL_HOLD_S", 0)
+    assert store.begin(["608_5554"])[0] == 1                # the hold is over: tried again
+    settle(store)
+
+
+def test_begin_refuses_once_fetching_has_stopped(store):
+    store.min_free = 10 ** 18
+    with pytest.raises(StoreFull):
+        store.begin(["602_5554"])
+
+
+def test_retry_after_is_the_recent_downloads_times_the_queue(store):
+    assert store.retry_after() == 20                        # nothing measured yet
+    with store._db() as con:
+        con.executemany("INSERT INTO downloads (id, seconds, at) VALUES (?, ?, ?)",
+                        [("a", 30.0, 1), ("b", 40.0, 2), ("c", 50.0, 3)])
+    assert store.retry_after() == 40
+    store._queued.update({"x", "y", "z"})                   # 3 queued over 2 jobs: two rounds
+    assert store.retry_after() == 80
+    store._queued.update({str(i) for i in range(20)})
+    assert store.retry_after() == 120                       # capped
+
+
 def test_reconcile_follows_the_disk(store):
     store.ensure(["602_5554", "604_5554"])
     store.jp2("604_5554").unlink()                           # gone behind the record's back

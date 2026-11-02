@@ -3,6 +3,7 @@ the entrypoint is bash or Python — all assertions are on endpoints / container
 import concurrent.futures
 import io
 import subprocess
+import time
 
 from PIL import Image
 
@@ -46,7 +47,13 @@ def test_a_detail_tile_fetches_its_sheet_once(fetched):
 def test_a_sheet_that_does_not_exist_is_a_502_not_a_tile(server):
     # a sheet in ČÚZK's list but not in this test's source: never drawn without it
     x, y = deg2tile(49.2, 16.6, 16)            # Brno, far from the fixture
-    assert http(f"/wmts/oi/webmercator/16/{x}/{y}.png", timeout=60)[0] == 502
+    path = f"/wmts/oi/webmercator/16/{x}/{y}.png"
+    assert http(path, timeout=10)[0] == 503                # its download starts; it fails in the background
+    deadline = time.time() + 60
+    while (status := http(path, timeout=10)[0]) == 503 and time.time() < deadline:
+        time.sleep(1)
+    assert status == 502                                   # and stays a 502 (FAIL_HOLD_S), in any worker
+    assert all(http(path, timeout=10)[0] == 502 for _ in range(8))
 
 
 def test_only_the_rest_tile_route_renders(server):

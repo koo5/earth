@@ -146,6 +146,32 @@ def test_one_address_waiting_on_new_sheets_does_not_hold_another_address_cached_
     assert slow[0].status_code == 200
 
 
+class Downloading(Upstream):
+    """The ortho service answering a tile whose sheets are downloading: 503 at once, Retry-After, what it started."""
+
+    def __init__(self, after="30", started="2"):
+        super().__init__({})
+        self.after, self.started = after, started
+
+    def __call__(self, req, timeout):
+        import email.message
+        import urllib.error
+        h = email.message.Message()
+        h["Retry-After"], h["X-Ortho-Cost"] = self.after, self.started
+        raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", h,
+                                     io.BytesIO(b"its sheets are downloading; retry in 30 s"))
+
+
+def test_a_tile_whose_sheets_are_downloading_is_passed_on_as_503_with_retry_after_and_charged(limited):
+    c = limited(Downloading())
+    r = c.get(url(DEAR))
+    assert r.status_code == 503 and r.headers["retry-after"] == "30" and "downloading" in r.json()["detail"]
+    assert c.get(url(DEAR)).status_code == 503                    # 3 - 2 - 2: what it started is charged
+    r = c.get(url(DEAR))
+    assert r.status_code == 429                                    # an address in debt waits
+    assert limited(Downloading(after="soon")).get(url(CHEAP)).status_code == 502
+
+
 def test_a_cost_that_is_not_a_finite_count_is_the_upstreams_fault(limited):
     for bad in ("x", "inf", "-1", "nan"):
         assert limited(Upstream({CHEAP: bad})).get(url(CHEAP)).status_code == 502

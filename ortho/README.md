@@ -32,9 +32,12 @@ a tile server that held all ~1.5 TB of sheets.
   per sheet so two requests fetch it once. The sidecars are published first and the `.jp2` last by
   an atomic rename, so a reader never sees half a sheet. A sheet that is not there (404) is not
   retried; another failure is, up to four tries.
-- **Rendering:** a detail tile is drawn only once every sheet under it is on disk. A first view of
-  an area waits for its sheets (seconds); a sheet that cannot be fetched is a 502 and a full store a
-  503, never a tile drawn with a hole that the cache would keep.
+- **Rendering:** a detail tile is drawn only once every sheet under it is on disk. Until then its
+  sheets download in the background and the tile is a 503 at once, with `Retry-After` (the median of
+  recent downloads times the queue) and `X-Ortho-Cost` (the downloads it started): no request waits on
+  a download, so cached tiles never queue behind one. A sheet that cannot be fetched is a 502 (for
+  5 minutes, in every worker, then tried again) and a full store a 503 without `Retry-After`, never a
+  tile drawn with a hole that the cache would keep.
 - **The index** MapServer reads is `/state/sheets.csv` (each held sheet's path and its 2 km square),
   rewritten atomically on every change. `/state/sheets.sqlite` records each sheet's size, arrival
   and whether the overview has it yet. At start the record follows the disk.
@@ -74,8 +77,8 @@ The `.png` in the URL is only a path; the `Content-Type` says which.
 
 MapProxy keeps tiles up to zoom 17 in `/cache/oi` (~5 MB per sheet at zooms 15-17). Zooms 18-20 are
 drawn from the sheets each time and never stored: stored, they would come to ~350 MB per 75 MB sheet.
-Every tile answers `X-Ortho-Cost`: the sheets fetched for it plus 1 if it was drawn rather than taken
-from the cache. This service sees only earth, which charges that cost to the client who asked
+Every tile answers `X-Ortho-Cost`: 1 if it was drawn rather than taken from the cache, and a waiting
+tile's 503 the sheet downloads it started. This service sees only earth, which charges that cost to the client who asked
 (`../earth/limits.py`).
 
 ## Endpoints (port 8080)
@@ -96,7 +99,7 @@ fetching its sheets and cache it for good. Any other `/wmts/` path is a 404.
 | variable | default | what |
 |---|---|---|
 | `SHEETS_URL` | `https://openzu.cuzk.gov.cz/opendata/OI` | where `<id>.zip` is fetched from (a `file://` directory works: the tests) |
-| `FETCH_JOBS` | `4` | sheets fetched at once by one request |
+| `FETCH_JOBS` | `4` | sheets downloaded at once by one worker |
 | `SHEET_BUDGET_GB` | `450` | disk for held sheets (~6,000, ~30% of Czechia); past it nothing is fetched |
 | `MIN_FREE_GB` | `50` | and nothing either while the disk has less free than this |
 | `OV_MIN_SHEETS`, `OV_QUIET_S`, `OV_MAX_AGE_S` | `8`, `300`, `3600` | the overview's hysteresis |

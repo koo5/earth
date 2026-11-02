@@ -33,11 +33,13 @@ _HALF = 20037508.342789244
 
 
 class OrthoError(RuntimeError):
-    """Upstream failed (not 'there is no imagery here', which is None): the status to answer."""
+    """Upstream failed or is not ready (not 'there is no imagery here', which is None): the status to answer,
+    with the ortho service's Retry-After when it gave one (a tile whose sheets are downloading) and what the
+    ask cost it (the downloads it started), which the caller still charges."""
 
-    def __init__(self, status: int, detail: str):
+    def __init__(self, status: int, detail: str, retry_after: str | None = None, cost: float = 0.0):
         super().__init__(detail)
-        self.status, self.detail = status, detail
+        self.status, self.detail, self.retry_after, self.cost = status, detail, retry_after, cost
 
 
 def tile_extent_3857(z: int, x: int, y: int) -> tuple[float, float, float, float]:
@@ -79,9 +81,16 @@ def fetch(z: int, x: int, y: int) -> tuple[bytes, str, float] | None:
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
-        if e.code == 503:                           # its sheet storage is full: passed on as it said it
+        if e.code == 503:
+            # with Retry-After: its sheets are downloading, come back then (what that started is charged);
+            # without: its sheet storage is full. Passed on as it said it.
             detail = e.read()[:300].decode(errors="replace")
-            raise OrthoError(503, f"orthophoto {z}/{x}/{y} unavailable: {detail}")
+            after = e.headers.get("Retry-After")
+            if after is not None and not (after.isdigit() and 1 <= int(after) <= 600):
+                raise OrthoError(502, f"the ortho service sent Retry-After {after!r} for ortho {z}/{x}/{y}")
+            cost = e.headers.get("X-Ortho-Cost")
+            raise OrthoError(503, f"orthophoto {z}/{x}/{y} unavailable: {detail}", after,
+                             _cost(cost, z, x, y) if cost is not None else 0.0)
         raise OrthoError(502, f"the ortho service answered {e.code} for ortho {z}/{x}/{y}")
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise OrthoError(503, f"the ortho service is unreachable for ortho {z}/{x}/{y}: "
