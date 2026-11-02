@@ -55,6 +55,53 @@ def test_holes_far_apart_are_filled_in_blocks_and_each_as_alone(world, monkeypat
     assert np.allclose(whole, blocks, atol=1e-4) and np.allclose(whole, alone, atol=1e-4)
 
 
+def _boundless_fill(vrt, lons, lats, reach_m):
+    """The fill as it read until 2026-11-02 (ea08): rasterio's boundless window, the reference for the clipped one."""
+    import math
+    import rasterio.transform
+    from rasterio.fill import fillnodata
+    from rasterio.io import MemoryFile
+    from rasterio.windows import Window
+    with rasterio.open(vrt) as ds:
+        nd = ds.nodata if ds.nodata is not None else -9999.0
+        m_lon = 111_320.0 * math.cos(math.radians(float(np.mean(lats))))
+        reach = int(math.ceil(reach_m / min(abs(ds.res[0]) * m_lon, abs(ds.res[1]) * 111_320.0)))
+        rows, cols = rasterio.transform.rowcol(ds.transform, lons, lats, op=float)
+        r0, r1 = int(math.floor(np.min(rows))) - reach - 2, int(math.ceil(np.max(rows))) + reach + 2
+        c0, c1 = int(math.floor(np.min(cols))) - reach - 2, int(math.ceil(np.max(cols))) + reach + 2
+        win = Window(c0, r0, c1 - c0, r1 - r0)
+        a = ds.read(1, window=win, boundless=True, fill_value=nd).astype("float32")
+        transform, crs = ds.window_transform(win), ds.crs
+    ok = np.isfinite(a) & (a != nd) & (a > -1000)
+    a[~ok] = nd
+    a = fillnodata(a, mask=ok.astype("uint8"), max_search_distance=reach, smoothing_iterations=0)
+    with MemoryFile() as mf:
+        with mf.open(driver="GTiff", width=a.shape[1], height=a.shape[0], count=1, dtype="float32",
+                     crs=crs, transform=transform, nodata=nd) as mem:
+            mem.write(a, 1)
+            h = np.asarray(gd.bilinear(mem, lons, lats), float)
+    h[~np.isfinite(h) | (h == nd) | (h <= -1000)] = np.nan
+    return h
+
+
+def test_the_fill_reads_the_mosaic_once_and_answers_as_the_boundless_read_did(world, monkeypatch):
+    """A cold z9 bare tile on the built country took 84 s, 34 of them reopening dtm10.vrt per 5 km block and most
+    of the rest rasterio's boundless reads (ea08). Every window here runs off the raster's edge."""
+    make_tif(str(world / "warp/dtm10/AAAA00.tif"), A, plane, hole=(slice(1, 6), slice(30, 38)))
+    vrt = str(world / "dtm10.vrt")
+    pts = [P_HOLE, (A[0] + 0.0335, A[3] - 0.0025), (A[0] + 0.0005, A[1] + 0.0005), P_OK]
+    lons, lats = np.array([p[0] for p in pts]), np.array([p[1] for p in pts])
+    opened = []
+    real_open = rasterio.open
+    monkeypatch.setattr(rasterio, "open", lambda *a, **k: opened.append(a[0]) or real_open(*a, **k))
+    monkeypatch.setattr(gd, "_FILL_BLOCK_M", 100.0)                 # a block per point
+    got = gd.filled_heights(vrt, lons, lats, reach_m=300.0)
+    assert opened.count(vrt) == 1
+    monkeypatch.setattr(rasterio, "open", real_open)
+    want = np.array([_boundless_fill(vrt, lons[i:i + 1], lats[i:i + 1], 300.0)[0] for i in range(len(pts))])
+    assert np.isfinite(got).all() and np.array_equal(got, want)
+
+
 def test_bare_never_answers_from_glo30(world):
     g = _ask([P_NOT_FETCHED], "bare")
     assert g.status == ["not_fetched"] and g.sources() == {}

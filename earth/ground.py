@@ -265,32 +265,40 @@ def filled_heights(path: str, lons, lats, reach_m: float | None = None):
     blocks: dict[tuple[int, int], list[int]] = {}
     for i, (lo, la) in enumerate(zip(lons, lats)):
         blocks.setdefault((int(lo * m_lon // _FILL_BLOCK_M), int(la * 111_320.0 // _FILL_BLOCK_M)), []).append(i)
-    for idx in blocks.values():
-        out[idx] = _filled_window(path, lons[idx], lats[idx], reach_m)
+    import rasterio
+
+    # opened once: the country's dtm10.vrt lists 16,301 sheets, and opening it costs ~0.5 s -- once per block,
+    # it was 34 of a cold z9 tile's 84 s on earth.hillview.cz (2026-11-02, ea08)
+    with rasterio.open(path) as ds:
+        for idx in blocks.values():
+            out[idx] = _filled_window(ds, lons[idx], lats[idx], reach_m)
     return out
 
 
-def _filled_window(path: str, lons, lats, reach_m: float):
+def _filled_window(ds, lons, lats, reach_m: float):
     import numpy as np
-    import rasterio
     import rasterio.transform
     from rasterio.fill import fillnodata
     from rasterio.io import MemoryFile
     from rasterio.windows import Window
 
     out = np.full(len(lons), np.nan)
-    with rasterio.open(path) as ds:
-        nd = ds.nodata if ds.nodata is not None else -9999.0
-        m_lon = 111_320.0 * math.cos(math.radians(float(np.mean(lats))))
-        cell_m = min(abs(ds.res[0]) * m_lon, abs(ds.res[1]) * 111_320.0)
-        reach = int(math.ceil(reach_m / cell_m))
-        rows, cols = rasterio.transform.rowcol(ds.transform, lons, lats, op=float)
-        r0, r1 = int(math.floor(np.min(rows))) - reach - 2, int(math.ceil(np.max(rows))) + reach + 2
-        c0, c1 = int(math.floor(np.min(cols))) - reach - 2, int(math.ceil(np.max(cols))) + reach + 2
-        win = Window(c0, r0, c1 - c0, r1 - r0)
-        a = ds.read(1, window=win, boundless=True, fill_value=nd).astype("float32")
-        transform = ds.window_transform(win)
-        crs = ds.crs
+    nd = ds.nodata if ds.nodata is not None else -9999.0
+    m_lon = 111_320.0 * math.cos(math.radians(float(np.mean(lats))))
+    cell_m = min(abs(ds.res[0]) * m_lon, abs(ds.res[1]) * 111_320.0)
+    reach = int(math.ceil(reach_m / cell_m))
+    rows, cols = rasterio.transform.rowcol(ds.transform, lons, lats, op=float)
+    r0, r1 = int(math.floor(np.min(rows))) - reach - 2, int(math.ceil(np.max(rows))) + reach + 2
+    c0, c1 = int(math.floor(np.min(cols))) - reach - 2, int(math.ceil(np.max(cols))) + reach + 2
+    win = Window(c0, r0, c1 - c0, r1 - r0)
+    # the part on the raster, read as it is; the rest nodata. Not rasterio's boundless read: that goes through
+    # a WarpedVRT, and was most of the other half of those 84 s
+    a = np.full((r1 - r0, c1 - c0), nd, "float32")
+    rr0, rr1, cc0, cc1 = max(r0, 0), min(r1, ds.height), max(c0, 0), min(c1, ds.width)
+    if rr0 < rr1 and cc0 < cc1:
+        a[rr0 - r0:rr1 - r0, cc0 - c0:cc1 - c0] = ds.read(1, window=Window(cc0, rr0, cc1 - cc0, rr1 - rr0))
+    transform = ds.window_transform(win)
+    crs = ds.crs
     ground_ = np.isfinite(a) & (a != nd) & (a > -1000)
     if not ground_.any():
         return out
