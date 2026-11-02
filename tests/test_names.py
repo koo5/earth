@@ -68,9 +68,11 @@ def built(tmp_path, monkeypatch):
     src.write_text("\n".join([node(14.42 + k * 0.014, 50.08, natural="peak", name=f"p{k}", ele=str(200 + k))
                               for k in range(1, 10)] + [node(16.5, 50.08, place="town", name="far", ele="300")]),
                    encoding="utf-8")
-    summary = names.build(str(src), os.path.join(names.names_dir(), "names-cz.json"),
-                          surface=lambda lons, lats: (np.full(len(lons), np.nan), np.zeros(len(lons), bool)),
-                          geoid=lambda lats, lons: np.full(len(lats), 45.0))
+    no_surface = lambda lons, lats: (np.full(len(lons), np.nan), np.zeros(len(lons), bool))
+    with pytest.raises(names.NamesError, match="names the ground"):
+        names.build(str(src), str(tmp_path / "x.json"), surface=no_surface)
+    summary = names.build(str(src), os.path.join(names.names_dir(), "names-cz.json"), surface=no_surface,
+                          geoid=lambda lats, lons: np.full(len(lats), 45.0), ground={"dsm_vrt": [1, 2]})
     return summary
 
 
@@ -94,6 +96,7 @@ def test_a_release_is_one_frozen_file_served_as_the_labels_api_answers(built):
     s = store.Store()
     r = s.release("names-cz")
     assert r.layer == "names" and r.immutable and r.sources["count"] == 10 and len(r.sources["sha256"]) == 64
+    assert r.sources["ground"] == {"dsm_vrt": [1, 2]} and r.sources["estimated"] == 0    # the ground it stands on
     c = TestClient(app_mod.create_app(store=s, limits=limits.Limits()))
     got = c.get("/t/names-cz/names", params={"lat": 50.08, "lon": 14.42, "radius_m": 3500, "chunk": 0, "chunks": 1})
     assert got.status_code == 200 and got.headers["x-attribution"] == "osm"
@@ -103,6 +106,17 @@ def test_a_release_is_one_frozen_file_served_as_the_labels_api_answers(built):
     assert body["labels"][0] == {"name": "p3", "lat": 50.08, "lon": 14.462, "kind": "peak", "ele": 203.0, "h": 248.0}
     assert c.get("/t/nope/names", params={"lat": 50, "lon": 14}).status_code == 404
     assert c.get("/t/names-cz/names", params={"lat": 95, "lon": 14}).status_code == 422
+    # a file that will not load is the server's fault, not the asker's
+    with open(os.path.join(names.names_dir(), "names-cz.json"), "w") as fh:
+        fh.write("{}")
+    names._load.cache_clear()
+    assert c.get("/t/names-cz/names", params={"lat": 50, "lon": 14}).status_code == 500
+
+
+def test_the_disc_distances_are_the_workbench_haversine_over_arrays(built):
+    n = names.release("names-cz.json")
+    d = n.distances(50.08, 14.42)
+    assert np.allclose(d, [names._haversine_m(50.08, 14.42, f["lat"], f["lon"]) for f in n.all], rtol=0, atol=1e-6)
 
 
 def test_a_build_refuses_a_surface_that_is_not_built_here(monkeypatch):

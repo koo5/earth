@@ -249,8 +249,11 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
             raise HTTPException(404, f"no names release {rid}")
         try:
             n = await run_in_threadpool(names.release, r.sources["names"])
+        except (names.NamesError, OSError) as e:          # the release's file: the server's fault
+            raise HTTPException(500, f"names release {rid}: {e}")
+        try:
             out = n.disc(lat, lon, radius_m, chunk, chunks)
-        except names.NamesError as e:
+        except names.NamesError as e:                     # the point asked: the client's
             raise HTTPException(422, str(e))
         return JSONResponse(out, headers={"Cache-Control": IMMUTABLE if r.immutable else LIVE, "X-Attribution": "osm"})
 

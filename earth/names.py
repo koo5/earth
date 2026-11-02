@@ -30,8 +30,6 @@ GENERATOR = "earth names v1"
 R_EARTH_M = 6_371_000.0
 MAX_RADIUS_M = 200_000.0
 MAX_CHUNKS = 64
-# the index's cells, degrees: a 120 km disc touches a few hundred
-CELL_DEG = 0.1
 
 
 class NamesError(ValueError):
@@ -182,14 +180,24 @@ def with_heights(feats: list[dict], surface: Surface | None = None, geoid: Geoid
     return [{**f, "h": round(f["ele"] + float(nn), 2)} for f, nn in zip(placed, n)]
 
 
-def build(geojsonseq: str, out: str, surface: Surface | None = None, geoid: Geoid | None = None) -> dict:
-    """names.sh's export -> the release file (`out`, under names_dir() for a release); what was built."""
+def build(geojsonseq: str, out: str, surface: Surface | None = None, geoid: Geoid | None = None,
+          ground: dict | None = None) -> dict:
+    """names.sh's export -> the release file (`out`, under names_dir() for a release); what was built. The file
+    records the ground its estimated heights stand on (`ground`: the surface mosaics' stamp, as a terrain release
+    records it), so a release says which ground it baked in (PLANET's review: a +44 m build would have gone in
+    unseen). A caller that brings its own `surface` names its ground."""
+    if surface is None:
+        from . import ground as ground_mod, tiles
+        ground = tiles.source_stamp(ground_mod.TERRAIN_SURFACE)
+    elif ground is None:
+        raise NamesError("a build with its own surface names the ground it stands on (ground=...)")
     with open(geojsonseq, encoding="utf-8") as fh:
         feats = features(fh)
     named = with_heights(feats, surface, geoid)
     named.sort(key=lambda f: (f["lat"], f["lon"], f["kind"], f["name"]))
     with open(out, "w", encoding="utf-8") as fh:
-        json.dump({"generator": GENERATOR, "names": named}, fh, ensure_ascii=False, separators=(",", ":"))
+        json.dump({"generator": GENERATOR, "ground": ground, "names": named}, fh, ensure_ascii=False,
+                  separators=(",", ":"))
     kinds: dict[str, int] = {}
     for f in named:
         kinds[f["kind"]] = kinds.get(f["kind"], 0) + 1
@@ -206,7 +214,9 @@ def describe(name: str) -> dict:
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    return {"names": name, "bytes": os.path.getsize(path), "sha256": h.hexdigest(), "count": len(Names(path).all)}
+    n = Names(path)
+    return {"names": name, "bytes": os.path.getsize(path), "sha256": h.hexdigest(), "count": len(n.all),
+            "estimated": sum(1 for f in n.all if f.get("ele_estimated")), "ground": n.ground}
 
 
 # copied from the workbench's routers/terrain.py, as above
@@ -219,21 +229,25 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 class Names:
-    """One release's names, read once and indexed by cell."""
+    """One release's names, read once, their positions kept as arrays so a disc is one pass (a few ms over a
+    country; a Python loop took 28-59 ms and holds the server's one process: PLANET's review)."""
 
     def __init__(self, path: str):
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
-        if doc.get("generator") != GENERATOR or not isinstance(doc.get("names"), list):
+        if doc.get("generator") != GENERATOR or not isinstance(doc.get("names"), list) or not isinstance(doc.get("ground"), dict):
             raise NamesError(f"{path}: not a {GENERATOR} file")
         self.all: list[dict] = doc["names"]
-        self.cells: dict[tuple[int, int], list[dict]] = {}
-        for f in self.all:
-            self.cells.setdefault(self._cell(f["lat"], f["lon"]), []).append(f)
+        self.ground: dict = doc["ground"]
+        self._lat = np.radians(np.array([f["lat"] for f in self.all], float))
+        self._lon = np.radians(np.array([f["lon"] for f in self.all], float))
+        self._ele = np.array([f["ele"] for f in self.all], float)
 
-    @staticmethod
-    def _cell(lat: float, lon: float) -> tuple[int, int]:
-        return math.floor(lat / CELL_DEG), math.floor(lon / CELL_DEG)
+    def distances(self, lat: float, lon: float) -> np.ndarray:
+        """metres from (lat, lon) to every name: _haversine_m's formula, over the arrays"""
+        la, lo = math.radians(lat), math.radians(lon)
+        a = np.sin((self._lat - la) / 2) ** 2 + math.cos(la) * np.cos(self._lat) * np.sin((self._lon - lo) / 2) ** 2
+        return 2 * 6_371_000 * np.arcsin(np.minimum(1.0, np.sqrt(a)))
 
     def disc(self, lat: float, lon: float, radius_m: float, chunk: int | None = None, chunks: int = 1) -> dict:
         """The names within radius_m of (lat, lon); with `chunk`, slice `chunk` of `chunks` by distance, nearest
@@ -241,26 +255,19 @@ class Names:
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
             raise NamesError(f"no point {lat}, {lon}")
         radius_m = max(1_000.0, min(radius_m, MAX_RADIUS_M))
-        dlat = math.degrees(radius_m / R_EARTH_M)
-        dlon = dlat / max(0.01, math.cos(math.radians(lat)))
-        (c0, d0), (c1, d1) = self._cell(lat - dlat, lon - dlon), self._cell(lat + dlat, lon + dlon)
-        found = []
-        for ci in range(c0, c1 + 1):
-            for cj in range(d0, d1 + 1):
-                for f in self.cells.get((ci, cj), ()):
-                    d = _haversine_m(lat, lon, f["lat"], f["lon"])
-                    if d <= radius_m:
-                        found.append((d, f))
-        found.sort(key=lambda x: x[0])
+        d = self.distances(lat, lon)
+        idx = np.flatnonzero(d <= radius_m)
+        idx = idx[np.argsort(d[idx], kind="stable")]
         out: dict = {}
         if chunk is not None:
             n = max(1, min(MAX_CHUNKS, chunks))
             i = max(0, min(chunk, n - 1))
-            k = len(found)
-            found = found[i * k // n:(i + 1) * k // n]
+            k = len(idx)
+            idx = idx[i * k // n:(i + 1) * k // n]
             out = {"chunk": i, "chunks": n}
         # highest first within what is answered, as the workbench's pool sorts its result
-        return {"labels": sorted((f for _, f in found), key=lambda f: f["ele"], reverse=True), **out}
+        idx = idx[np.argsort(-self._ele[idx], kind="stable")]
+        return {"labels": [self.all[j] for j in idx], **out}
 
 
 _lock = threading.Lock()
