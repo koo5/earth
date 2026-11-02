@@ -198,3 +198,17 @@ def test_the_attribution_names_cuzk_with_the_terms_and_the_metadata(svc):
 def test_coverage_is_the_service_extent():
     assert ortho.covered(*tile_of(50.08, 14.42, 15)) and ortho.covered(*tile_of(49.0, 17.0, 12))
     assert not ortho.covered(*tile_of(48.85, 2.35, 10))
+
+
+def test_an_ortho_release_publishes_the_box_it_answers_in(tmp_path, monkeypatch, capsys):
+    import json
+    from earth import cli
+    monkeypatch.setenv("EARTH_STORE", str(tmp_path / "store"))
+    monkeypatch.setenv("EARTH_ORTHO_URL", "http://ortho/{z}/{x}/{y}")
+    assert cli.main(["release", "register", "ortho", "ortho-b", "--live", "--year", "2024-2025"]) == 0
+    w, s, e, n = json.loads(capsys.readouterr().out)["sources"]["extent"]
+    assert 11.8 < w < 11.9 and 48.1 < s < 48.3 and 19.1 < e < 19.2 and 51.3 < n < 51.5   # ČÚZK's ORTOFOTO_WM box
+    # outward: a tile just inside each corner is one earth serves, and the box keeps it
+    for lat, lon in ((s + 1e-4, w + 1e-4), (n - 1e-4, e - 1e-4)):
+        assert ortho.covered(*tile_of(lat, lon, 12))
+    assert not ortho.covered(*tile_of(s - 0.2, w - 0.2, 12))

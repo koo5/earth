@@ -47,6 +47,16 @@ def tile_extent_3857(z: int, x: int, y: int) -> tuple[float, float, float, float
     return (-_HALF + x * size, _HALF - (y + 1) * size, -_HALF + (x + 1) * size, _HALF - y * size)
 
 
+def extent_degrees() -> list[float]:
+    """EXTENT_3857 as [w, s, e, n] degrees, rounded outward to 1e-6: what an ortho release publishes
+    (sources.extent), so a client skips the tiles wholly outside it and never one that covered() serves."""
+    W, S, E, N = EXTENT_3857
+    lon = lambda x: x / _HALF * 180.0
+    lat = lambda y: math.degrees(math.atan(math.sinh(y / _HALF * math.pi)))
+    return [math.floor(lon(W) * 1e6) / 1e6, math.floor(lat(S) * 1e6) / 1e6,
+            math.ceil(lon(E) * 1e6) / 1e6, math.ceil(lat(N) * 1e6) / 1e6]
+
+
 def covered(z: int, x: int, y: int) -> bool:
     """Whether the tile touches the service's extent at all."""
     w, s, e, n = tile_extent_3857(z, x, y)
