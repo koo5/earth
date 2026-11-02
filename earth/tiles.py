@@ -19,11 +19,12 @@ the building, with the orthophoto's roof stretched over it (2026-10-15).
 Every sample carries a SOURCE byte (SOURCES), which is how a client knows where the data is no
 finer than the tile, and how the attribution knows what it is attributing.
 
-COMPLETE = every sample has a height and none is waiting on data that could still arrive: a ČÚZK
-sheet in the index but not built, a GLO-30 tile not fetched, at a zoom where that data would be
-used. Only a complete tile is kept (store.py); an incomplete one is answered and made again next
-time. A coarse tile drawn from the global model is final, so it is complete: an ocean tile used to
-stay incomplete for ever and a client never settled.
+COMPLETE = no sample is waiting on data that could still arrive: a ČÚZK sheet in the index but not
+built, a GLO-30 tile not fetched, at a zoom where that data would be used. Only a complete tile is
+kept (store.py); an incomplete one is answered and made again next time. A coarse tile drawn from
+the global model is final, so it is complete: an ocean tile used to stay incomplete for ever and a
+client never settled. So is a hole the fill cannot reach (a pond wider than its reach): the same
+mosaics give the same hole, and its tile was remade on every ask until 2026-11-02 (ea08).
 
 Wire formats: see `encode_f32` and `encode_q16`.
 
@@ -175,7 +176,9 @@ class Tile:
     # what each sample's ground said (ground.GROUND_STATUSES), coarse tiles: ok / missing
     counts: dict = field(default_factory=dict)
     # why the tile is not complete: "cuzk" (a sheet in the index not built), "glo30" (a tile not
-    # fetched), "nodata" (samples with no height at all)
+    # fetched). A hole the fill cannot reach (water wider than its reach) is no wait: the same mosaics
+    # give the same hole, so the tile is final, kept, and counts it in `counts` (ea08, 2026-11-02:
+    # the Třeboň ponds' z9 tile was remade on every ask, and a client asked again every 30 s)
     waiting: list = field(default_factory=list)
 
     @property
@@ -261,8 +264,6 @@ def make(z: int, x: int, y: int, model: str) -> Tile:
         Nh = datum.geoid_heights(lats, lons)
     except datum.GeoidMissing as e:
         raise TileError(f"no geoid grid to make the heights ellipsoidal: {e}") from e
-    if not np.isfinite(H).all():
-        waiting.append("nodata")
     return Tile(z, x, y, model, H + Nh, src, counts, waiting)
 
 

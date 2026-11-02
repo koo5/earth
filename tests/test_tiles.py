@@ -134,7 +134,7 @@ def test_a_hole_beyond_the_reach_stays_a_hole(world, monkeypatch):
     make_tif(str(world / "warp/dtm10/AAAA00.tif"), A, plane, hole=(slice(4, 10), slice(10, 16)))
     monkeypatch.setattr(gd, "FILL_REACH_M", 100.0)
     t = tiles.make(*tile_of(50.0115, 14.013, 15), "bare")
-    assert "nodata" in t.waiting and not t.complete
+    assert t.complete and t.waiting == [] and t.counts["nodata"] > 0   # final: the same mosaics, the same hole
     lost = ~np.isfinite(t.heights)
     assert lost.any() and (t.src[lost] == 0).all()   # no height, and no global model under it
     assert "etopo60" not in t.used()

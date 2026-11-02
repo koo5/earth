@@ -58,6 +58,24 @@ def test_an_incomplete_tile_is_answered_but_not_kept(svc):
     assert c.get(url(*UNBUILT)).headers["x-tile-kept"] == "0"
 
 
+def test_a_tile_with_a_hole_the_fill_cannot_reach_is_complete_and_kept(world, monkeypatch):
+    """A lake wider than the fill's reach is the same hole on every make of the same mosaics: the tile is
+    final. It was "waiting: nodata", remade on every ask (9/277/175, the Třeboň ponds: ~10 s each, ea08)."""
+    from conftest import A, make_tif
+    make_tif(str(world / "warp/dtm10/AAAA00.tif"), A, plane, hole=(slice(4, 10), slice(10, 16)))
+    monkeypatch.setattr(tiles.ground, "FILL_REACH_M", 100.0)
+    monkeypatch.setenv("EARTH_NO_LIMITS", "1")
+    s = store.Store()
+    s.register("terrain-a", "terrain", {m: tiles.source_stamp(m) for m in tiles.MODELS}, "test")
+    c = TestClient(app_mod.create_app(store=s, limits=limits.Limits()))
+    lake = tile_of(50.0115, 14.013, 15)
+    r = c.get(url(*lake))
+    assert r.headers["x-tile-complete"] == "1" and "x-tile-waiting" not in r.headers
+    assert "nodata:" in r.headers["x-tile-status"] and r.headers["cache-control"] == app_mod.IMMUTABLE
+    assert np.isnan(tiles.decode_q16(r.content)[0]).any()
+    assert c.get(url(*lake)).headers["x-tile-kept"] == "1"
+
+
 def test_bad_requests_are_404(svc):
     c, _ = svc
     assert c.get(url(*BUILT, rid="nope")).status_code == 404
