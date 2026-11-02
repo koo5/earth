@@ -16,7 +16,7 @@ import argparse
 import json
 import sys
 
-from . import citymodels, config, names, ortho, osm, reference, store as store_mod, tiles
+from . import citymodels, config, ground, names, ortho, osm, reference, store as store_mod, tiles
 
 GENERATOR = "earth-terrain/1 q16+f32 n65"
 
@@ -114,9 +114,6 @@ def main(argv: list[str] | None = None) -> int:
         elif a.what == "release" and a.cmd == "register":
             sources = {m: tiles.source_stamp(m) for m in tiles.MODELS}
             missing = sorted({k for m in sources.values() for k, v in m.items() if v is None})
-            if missing and not a.live:
-                print(f"warning: not on this machine: {', '.join(missing)} -- the release is registered "
-                      f"on their absence, and the tiles that would read them fall back", file=sys.stderr)
             # checked against surveyed summits before anything can serve it (reference.py)
             if a.unchecked is not None:
                 if not a.unchecked.strip():
@@ -125,8 +122,11 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 try:
                     sources["reference"] = reference.check()
-                except reference.ReferenceError as e:
+                except (reference.ReferenceError, ground.GroundConfigError) as e:
                     raise store_mod.StoreError(f"not registered: {e}")
+            if missing and not a.live:
+                print(f"warning: not on this machine: {', '.join(missing)} -- the release is registered "
+                      f"on their absence, and the tiles that would read them fall back", file=sys.stderr)
             r = s.register(a.id, a.layer, sources, GENERATOR, "live" if a.live else "frozen", a.note)
             print(json.dumps(r.__dict__, indent=1))
         elif a.what == "release":

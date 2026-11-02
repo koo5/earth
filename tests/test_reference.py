@@ -74,3 +74,9 @@ def test_the_shipped_summits_are_in_czechia_with_heights():
     s = reference.load()
     assert len(s) >= 20 and len({p["name"] for p in s}) == len(s)
     assert all(48.5 < p["lat"] < 51.1 and 12.0 < p["lon"] < 18.9 and 100 < p["ele"] < 1610 for p in s)
+
+
+def test_an_unreadable_mosaic_is_not_registered_either(built, capsys):
+    (built / "dsm2.vrt").write_text("not a raster")
+    assert cli.main(["release", "register", "terrain", "terrain-c"]) == 2
+    assert "not registered" in capsys.readouterr().err and store.Store().release("terrain-c") is None
