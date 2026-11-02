@@ -88,7 +88,7 @@ def fetched(server):
     at once, with Retry-After and the download it started as its cost; the client comes back."""
     x, y = deg2tile(*TILE_CENTER, 16)
     status, headers, body = http_full(f"/wmts/oi/webmercator/16/{x}/{y}.png", timeout=10)
-    assert status == 503 and 5 <= int(headers["Retry-After"]) <= 120, (status, body[:300])
+    assert status == 503 and 5 <= int(headers["Retry-After"]) <= 60, (status, body[:300])
     assert headers["X-Ortho-Cost"] == "1"
     deadline = time.time() + 120
     while time.time() < deadline:

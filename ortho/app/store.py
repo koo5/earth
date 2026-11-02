@@ -48,8 +48,10 @@ class StoreFull(RuntimeError):
 # a sheet whose download failed answers that failure for this long before it is tried again (in every worker:
 # the failure is recorded in sheets.sqlite), so a sheet ČÚZK does not have is a 502, not a 503 for ever
 FAIL_HOLD_S = 300
-# Retry-After for a waiting tile: the median of recent downloads, times the server's queue over its slots
-RETRY_MIN_S, RETRY_MAX_S, RETRY_FIRST_S = 5, 120, 20
+# Retry-After for a waiting tile: the median of recent transfers, times the server's queue over its slots. Kept
+# short: too short costs one more 503 that starts nothing, too long keeps a viewer waiting for a sheet already
+# here (112 s asked, the sheet in after 40 s: 11-02, when transfers timed from their queueing)
+RETRY_MIN_S, RETRY_MAX_S, RETRY_FIRST_S = 5, 60, 20
 # a queue row older than this is a worker that died mid-download (rows are also cleared at start)
 QUEUE_STALE_S = 1800
 
@@ -196,10 +198,8 @@ class Store:
         with self._db() as con:
             con.execute("INSERT OR REPLACE INTO queue (id, by, at) VALUES (?, ?, ?)", (sid, by, time.time()))
         try:
-            t = time.time()
             if self.ensure([sid]):
                 with self._db() as con:
-                    con.execute("INSERT INTO downloads (id, seconds, at) VALUES (?, ?, ?)", (sid, time.time() - t, time.time()))
                     con.execute("DELETE FROM failures WHERE id = ?", (sid,))
             return self.jp2(sid).exists()
         except Exception as e:  # noqa: BLE001 -- recorded for the next ask of it, in any worker
@@ -246,7 +246,9 @@ class Store:
             try:
                 zpath = tmp / f"{sid}.zip"
                 with self.download_slot():
+                    t = time.time()                     # the transfer alone, not the wait for a slot
                     download(f"{self.url}/{sid}.zip", zpath)
+                    took = time.time() - t
                 with zipfile.ZipFile(zpath) as z:
                     names = set(z.namelist())
                     if f"{sid}.jp2" not in names or f"{sid}.j2w" not in names:
@@ -263,6 +265,7 @@ class Store:
             with self._db() as con:
                 con.execute("INSERT OR REPLACE INTO sheets (id, bytes, arrived, in_overview) VALUES (?, ?, ?, 0)",
                             (sid, size, time.time()))
+                con.execute("INSERT INTO downloads (id, seconds, at) VALUES (?, ?, ?)", (sid, took, time.time()))
             print(f"[sheets] fetched {sid} ({size / 1e6:.0f} MB)", flush=True)
             return True
 

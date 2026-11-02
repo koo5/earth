@@ -35,7 +35,7 @@ a tile server that held all ~1.5 TB of sheets.
   retried; another failure is, up to four tries.
 - **Rendering:** a detail tile is drawn only once every sheet under it is on disk. Until then its
   sheets download in the background and the tile is a 503 at once, with `Retry-After` (the median of
-  recent downloads times the queue) and `X-Ortho-Cost` (the downloads it started): no request waits on
+  recent transfers times the server's queue over its slots, 5-60 s) and `X-Ortho-Cost` (the downloads it started): no request waits on
   a download, so cached tiles never queue behind one. A sheet that cannot be fetched is a 502 (for
   5 minutes, in every worker, then tried again) and a full store a 503 without `Retry-After`, never a
   tile drawn with a hole that the cache would keep.

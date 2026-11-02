@@ -193,7 +193,7 @@ def test_begin_downloads_in_the_background_once_and_then_the_tile_is_ready(store
     original = store.ensure
     store.ensure = lambda ids: (gate.wait(5), original(ids))[1]
     started, after = store.begin(["602_5554", "604_5554"])
-    assert started == 2 and 5 <= after <= 120               # answered at once, not after the download
+    assert started == 2 and 5 <= after <= 60                # answered at once, not after the download
     assert not store.jp2("602_5554").exists()
     assert store.begin(["602_5554"]) == (0, after)          # in flight already: none started again
     gate.set()
@@ -237,12 +237,12 @@ def test_retry_after_is_the_recent_downloads_times_the_servers_queue(store):
     assert store.retry_after() == 20                        # nothing measured yet
     with store._db() as con:
         con.executemany("INSERT INTO downloads (id, seconds, at) VALUES (?, ?, ?)",
-                        [("a", 30.0, 1), ("b", 40.0, 2), ("c", 50.0, 3)])
-    assert store.retry_after() == 40
+                        [("a", 10.0, 1), ("b", 20.0, 2), ("c", 30.0, 3)])
+    assert store.retry_after() == 20
     queue(store, "x", "y", "z")                             # 3 queued, in any worker, over 2 slots: two rounds
-    assert store.retry_after() == 80
+    assert store.retry_after() == 40
     queue(store, *(str(i) for i in range(20)))
-    assert store.retry_after() == 120                       # capped
+    assert store.retry_after() == 60                        # capped: too long keeps a viewer waiting
     queue(store, "old", at=1.0)                             # a dead worker's row counts for nothing
     assert store.queued() == 23
 
