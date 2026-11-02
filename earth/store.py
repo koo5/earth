@@ -32,7 +32,7 @@ from dataclasses import dataclass
 
 from . import config
 
-LAYERS = ("terrain", "osm", "ortho", "models", "solves")
+LAYERS = ("terrain", "osm", "ortho", "models", "names", "solves")
 RELEASE_ID = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 CHANNEL_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 PACK_Z = 10

@@ -10,6 +10,8 @@
   GET /t/{release}/ortho/{z}/{x}/{y}.jpg
                                         the orthophoto (ortho.py), from the ortho service, never kept
   GET /t/{release}/osm/{z}/{x}/{y}.mvt  the map (osm.py), from the release's PMTiles archive
+  GET /t/{release}/names?lat&lon&radius_m[&chunk&chunks]
+                                        named peaks, towers and places round a point (names.py)
   GET /t/{release}/models/manifest.json the city models (citymodels.py): the release's manifest
   GET /t/{release}/models/assets/{sha256}.glb
                                         one of its meshes, only those its manifest names
@@ -29,7 +31,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import attribution, citymodels, config, ground as ground_mod, ortho, osm, store as store_mod, tiles
+from . import attribution, citymodels, config, ground as ground_mod, names, ortho, osm, store as store_mod, tiles
 from .limits import Limits
 
 IMMUTABLE = "public, max-age=31536000, immutable"
@@ -235,6 +237,22 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
                 return Response(body, media_type=osm.MEDIA_TYPE, headers=h | {"Content-Encoding": "gzip"})
             body = gzip.decompress(body)
         return Response(body, media_type=osm.MEDIA_TYPE, headers=h)
+
+    @app.get("/t/{rid}/names")
+    async def names_disc(rid: str, lat: float, lon: float, request: Request, radius_m: float = 120_000.0,
+                         chunk: int | None = None, chunks: int = 1):
+        """The names within radius_m of a point, as the workbench's /terrain/labels answers (names.py): near-first
+        chunks with `chunk`/`chunks`. A release never changes, so neither does an answer."""
+        lim().check_read(request)
+        r = st().release(rid)
+        if r is None or r.layer != "names":
+            raise HTTPException(404, f"no names release {rid}")
+        try:
+            n = await run_in_threadpool(names.release, r.sources["names"])
+            out = n.disc(lat, lon, radius_m, chunk, chunks)
+        except names.NamesError as e:
+            raise HTTPException(422, str(e))
+        return JSONResponse(out, headers={"Cache-Control": IMMUTABLE if r.immutable else LIVE, "X-Attribution": "osm"})
 
     models: dict[str, citymodels.Release] = {}
 

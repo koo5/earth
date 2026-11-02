@@ -18,6 +18,7 @@ path prefix (`https://earth.hillview.cz/<prefix>/...`, `deploy/README.md`).
 | `GET /t/{release}/ortho/{z}/{x}/{y}.jpg` | ČÚZK Ortofoto ČR (CC BY 4.0), 12.5 cm, from the ortho service as it came, never kept here; Czechia only (`earth/ortho.py`) |
 | `GET /t/{release}/osm/{z}/{x}/{y}.mvt` | OpenStreetMap (ODbL) as vector tiles from the release's PMTiles archive: buildings, walls, roads, water with raw tags and `osm_id`, zoom 13-15; 204 for empty ground (`earth/osm.py`) |
 | `GET /t/{release}/models/manifest.json`, `.../models/assets/{sha256}.glb` | IPR Praha's 3D buildings (2020, CC BY 4.0) as GLB meshes with ellipsoidal heights, prepared ahead by area and served only as the release's manifest names them; Prague only (`earth/citymodels.py`) |
+| `GET /t/{release}/names?lat&lon&radius_m[&chunk&chunks]` | OpenStreetMap's (ODbL) named peaks, observation towers, communication masts, water towers and places (city to quarter) round a point, each at an ellipsoidal height, as the workbench's `/terrain/labels` answers: near-first chunks (`earth/names.py`) |
 | `GET /attribution` | what each source requires shown; each tile names its own in `X-Attribution` |
 | `GET /<dem secret>/...` | the terrain mosaics themselves, read-only, for GDAL's `/vsicurl/`: served by Caddy under a secret path of their own (`deploy/Caddyfile`), not by earth |
 
@@ -47,6 +48,10 @@ fetching stops. `EARTH_ORTHO_URL` names it; there is no other upstream.
 **OSM**: `osm/build.sh` runs planetiler with `osm/hillview-map.yml` over Geofabrik's Czech extract
 into one `.pmtiles`.
 
+**Names**: `osm/names.sh` pulls the named points out of the same extract (Debian's osmium-tool) and
+`earth names build` keeps the workbench's names query and tags (copied from it), filling a missing `ele`
+from the surface model and making every height ellipsoidal; one JSON file per release.
+
 **City models**: `earth models prepare` reads IPR Praha's I3S scene for one circular area (at most
 2 km) and writes content-addressed GLBs; EGM96 heights are converted with a grid kept in the store.
 
@@ -69,14 +74,19 @@ osm/build.sh ~/earth/osm-build
 mv ~/earth/osm-build/czech-republic-<date>.pmtiles ~/earth/store/osm/
 earth release register osm osm-cz-<extract date> --pmtiles czech-republic-<date>.pmtiles
 
+# names: after osm/build.sh (it downloads the extract); heights from this machine's mosaics
+osm/names.sh ~/earth/osm-build
+earth names build /osm-build/czech-republic-names.geojsonseq --out /var/lib/earth/names/names-cz-<date>.json
+earth release register names names-cz-<date> --names names-cz-<date>.json
+
 # city models: the EGM96 grid once, then each area (prints its sha256), then a release of areas
 curl -fLo ~/earth/store/grids/egm96_15.gtx https://download.osgeo.org/proj/vdatum/egm96_15/egm96_15.gtx
 earth models prepare --lat 50.0909 --lon 14.4005 --radius 600
 earth release register models models-ipr-<date> --areas <sha256>[,<sha256>...]
 
 # channels: beta first; prod when it has been looked at
-earth channel set beta terrain=<id> ortho=<id> osm=<id> models=<id>
-earth channel set prod terrain=<id> ortho=<id> osm=<id> models=<id>
+earth channel set beta terrain=<id> ortho=<id> osm=<id> models=<id> names=<id>
+earth channel set prod terrain=<id> ortho=<id> osm=<id> models=<id> names=<id>
 ```
 
 A frozen release refuses to make tiles once its mosaics change: new sheets mean a new release. A

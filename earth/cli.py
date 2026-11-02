@@ -16,7 +16,7 @@ import argparse
 import json
 import sys
 
-from . import citymodels, config, ortho, osm, store as store_mod, tiles
+from . import citymodels, config, names, ortho, osm, store as store_mod, tiles
 
 GENERATOR = "earth-terrain/1 q16+f32 n65"
 
@@ -26,13 +26,14 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="what", required=True)
     rel = sub.add_parser("release").add_subparsers(dest="cmd", required=True)
     reg = rel.add_parser("register")
-    reg.add_argument("layer", choices=["terrain", "ortho", "osm", "models"])
+    reg.add_argument("layer", choices=["terrain", "ortho", "osm", "models", "names"])
     reg.add_argument("id")
     reg.add_argument("--live", action="store_true", help="follow the mosaics as they change (a workbench); never immutable")
     reg.add_argument("--note", default="")
     reg.add_argument("--year", help="ortho: the imagery's year(s), as its attribution shows them (ČÚZK, <year>)")
     reg.add_argument("--pmtiles", help="osm: the archive's file name in the store's osm/ directory (osm/build.sh)")
     reg.add_argument("--areas", help="models: the prepared areas' sha256s, comma-separated (earth models prepare)")
+    reg.add_argument("--names", help="names: the file's name in the store's names/ directory (earth names build)")
     rel.add_parser("list")
     ch = sub.add_parser("channel").add_subparsers(dest="cmd", required=True)
     cs = ch.add_parser("set")
@@ -46,7 +47,18 @@ def main(argv: list[str] | None = None) -> int:
     mp.add_argument("--lon", type=float, required=True)
     mp.add_argument("--radius", type=float, required=True, help=f"metres, at most {citymodels.MAX_RADIUS_M}")
     mp.add_argument("--refresh", action="store_true", help="refetch the source indexes; earlier bytes are kept")
+    nm = sub.add_parser("names").add_subparsers(dest="cmd", required=True)
+    nb = nm.add_parser("build", help="osm/names.sh's export -> a names file, heights from this machine's mosaics")
+    nb.add_argument("geojsonseq")
+    nb.add_argument("--out", required=True, help="the file to write; for a release, in the store's names/ directory")
     a = p.parse_args(argv)
+    if a.what == "names":
+        try:
+            print(json.dumps(names.build(a.geojsonseq, a.out)))
+        except (names.NamesError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        return 0
     if a.what == "models":
         try:
             sha, area = citymodels.prepare(config.egm96_grid(), a.lat, a.lon, a.radius, a.refresh)
@@ -77,6 +89,15 @@ def main(argv: list[str] | None = None) -> int:
             except osm.OsmError as e:
                 raise store_mod.StoreError(str(e))
             print(json.dumps(s.register(a.id, "osm", sources, GENERATOR, "frozen", a.note).__dict__, indent=1))
+        elif a.what == "release" and a.cmd == "register" and a.layer == "names":
+            # one file that never changes: frozen, and its sha256 says which
+            if a.live or not a.names:
+                raise store_mod.StoreError("a names release is one file (--names <file>), frozen")
+            try:
+                sources = names.describe(a.names)
+            except names.NamesError as e:
+                raise store_mod.StoreError(str(e))
+            print(json.dumps(s.register(a.id, "names", sources, names.GENERATOR, "frozen", a.note).__dict__, indent=1))
         elif a.what == "release" and a.cmd == "register" and a.layer == "models":
             # prepared areas, composed into one manifest that never changes: frozen, by sha256
             if a.live or not a.areas:
