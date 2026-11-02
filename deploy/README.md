@@ -28,8 +28,9 @@ clients; if it ever must change, serve the old and new side by side until they h
 Deploy: `cd ~/earth/src && git pull --ff-only && cd deploy && podman compose up -d --build` (earth, ortho and
 Caddy; the builder is a one-shot, `podman compose run --rm builder`). At boot `podman-restart.service`
 (user, enabled) starts every container with `restart: always`. Unhealthy containers: `earth-heal.timer`
-runs `heal-unhealthy.sh` every minute (`cp earth-heal.service earth-heal.timer ~/.config/systemd/user/
+runs `heal-unhealthy.sh` every minute, which recreates through compose a container that is unhealthy, or whose
+`earth.heal.probe` does not answer from the host (`cp earth-heal.service earth-heal.timer ~/.config/systemd/user/
 && systemctl --user daemon-reload && systemctl --user enable --now earth-heal.timer`);
 `journalctl --user -u earth-heal` says what it did.
 
-While 80/443 are closed, the same site answers in plain HTTP on the server's loopback, port 8081.
+The same site also answers in plain HTTP on the server's loopback, port 8081, for an ssh tunnel.

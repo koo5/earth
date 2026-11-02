@@ -47,7 +47,8 @@ services:
       timeout: 15s
       retries: 3
       start_period: 60s
-    labels: { earth.heal: restart }
+    # heal-unhealthy.sh also asks this from the host: healthy inside is not reachable (2026-11-02)
+    labels: { earth.heal: restart, earth.heal.probe: "http://127.0.0.1:8090/health" }
   ortho:
     # ČÚZK's orthophoto from its open JP2 sheets, each fetched when a detail tile first needs it, with a 4 m
     # overview filled in as they arrive (../ortho). Only earth talks to it, on this network; nothing is

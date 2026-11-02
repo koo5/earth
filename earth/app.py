@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from . import attribution, citymodels, config, ground as ground_mod, names, ortho, osm, store as store_mod, tiles
-from .limits import Limits
+from .limits import Limits, client_ip
 
 IMMUTABLE = "public, max-age=31536000, immutable"
 LIVE = "public, max-age=300"
@@ -60,7 +60,9 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
         return state["limits"]
 
     @app.get("/health")
-    def health():
+    async def health():
+        # on the loop, not the thread pool: a pool full of slow work is not a dead process (on 2026-11-02 ortho
+        # asks waiting for upstream slots held every thread, /health timed out, and the heal restarted earth)
         return {"ok": True}
 
     @app.get("/channels")
@@ -197,8 +199,10 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
         """ČÚZK's orthophoto tile from the ortho service, as it came (JPEG; PNG where it holds no sheet,
         said by Content-Type). Nothing is kept here: the ortho service caches what it draws and drops
         what a new sheet changes, so a copy here would go stale. A read, plus what the ortho service
-        says the tile cost (sheets fetched, a tile drawn) charged to the make bucket: checked and
-        charged inside the upstream slot (ortho.fetch)."""
+        says the tile cost (sheets fetched, a tile drawn) charged to the make bucket. The address's slot,
+        then one of everyone's, are waited for on the loop (no thread held); the debt check runs once
+        both are held and the charge before they go, so a request checked after another finished sees
+        that one's charge, and an address has at most its slots in flight past its check."""
         lim().check_read(request)
         r = st().release(rid)
         if r is None or r.layer != "ortho":
@@ -207,14 +211,16 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
             raise HTTPException(404, f"no ortho tile {z}/{x}/{y} (zoom 0..{ortho.MAX_Z})")
         if not ortho.covered(z, x, y):
             raise HTTPException(404, "no orthophoto outside Czechia")
-        try:
-            got = await run_in_threadpool(ortho.fetch, z, x, y, lambda: lim().check_owed(request),
-                                          lambda cost: lim().charge_make(request, cost))
-        except ortho.OrthoError as e:
-            raise HTTPException(e.status, e.detail)
-        if got is None:
-            raise HTTPException(404, f"no orthophoto at {z}/{x}/{y}")
-        body, mt = got
+        async with lim().ortho_address.hold(client_ip(request)), lim().ortho_upstream:
+            lim().check_owed(request)
+            try:
+                got = await run_in_threadpool(ortho.fetch, z, x, y)
+            except ortho.OrthoError as e:
+                raise HTTPException(e.status, e.detail)
+            if got is None:
+                raise HTTPException(404, f"no orthophoto at {z}/{x}/{y}")
+            body, mt, cost = got
+            lim().charge_make(request, cost)
         return Response(body, media_type=mt,
                         headers={"Cache-Control": LIVE, "X-Attribution": "cuzk-ortho"})
 
