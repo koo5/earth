@@ -38,7 +38,10 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 LIVE = "public, max-age=300"
 TILE_HEADERS = ["X-Tile-N", "X-Tile-Bounds", "X-Tile-Model", "X-Tile-Status", "X-Tile-Sources",
                 "X-Tile-Heights", "X-Tile-Format", "X-Tile-Complete", "X-Tile-Waiting", "X-Tile-Kept",
-                "X-Attribution"]
+                "X-Attribution",
+                # not CORS-safelisted: without it a page on another origin reads null, and retries a 429 or a
+                # downloading ortho tile's 503 on its own backoff instead of when it was asked to
+                "Retry-After"]
 
 
 def create_app(store: store_mod.Store | None = None, limits: Limits | None = None) -> FastAPI:

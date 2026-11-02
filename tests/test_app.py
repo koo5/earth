@@ -121,6 +121,7 @@ def test_attribution_and_cors(svc):
     r = c.get(url(*BUILT), headers={"Origin": "https://hillview.cz"})
     assert r.headers["access-control-allow-origin"] == "*"
     assert "X-Tile-Sources" in r.headers["access-control-expose-headers"]
+    assert "Retry-After" in r.headers["access-control-expose-headers"]   # the 429s' and ortho's 503s' (pl04)
 
 
 def test_ground_answers_points_and_boxes_with_a_status_each(svc):
