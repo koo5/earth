@@ -34,7 +34,9 @@ def _run_logged(cmd: list[str], label: str, *, output_path: str | None = None) -
     """
     started = time.monotonic()
     print(f"[build] {label} started", flush=True)
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL)
+    # niced: the overview is background work, and the tile renders it ran beside right after a batch of sheets
+    # took 80 s once (recon pl04)
+    proc = subprocess.Popen(["nice", "-n", "15", *cmd], stdout=subprocess.DEVNULL)
     next_report = started + BUILD_LOG_INTERVAL
     try:
         while True:

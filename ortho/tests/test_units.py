@@ -4,6 +4,7 @@
 """
 import sys
 import threading
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import overview  # noqa: E402
 import serve  # noqa: E402
 import sheets as S  # noqa: E402
+import prefetch  # noqa: E402
 from store import SheetMissing, Store, StoreFull  # noqa: E402
 
 KNOWN = S.load()
@@ -226,16 +228,54 @@ def test_begin_refuses_once_fetching_has_stopped(store):
         store.begin(["602_5554"])
 
 
-def test_retry_after_is_the_recent_downloads_times_the_queue(store):
+def queue(store, *ids, at=None):
+    with store._db() as con:
+        con.executemany("INSERT INTO queue (id, by, at) VALUES (?, 'tile', ?)", [(i, at or time.time()) for i in ids])
+
+
+def test_retry_after_is_the_recent_downloads_times_the_servers_queue(store):
     assert store.retry_after() == 20                        # nothing measured yet
     with store._db() as con:
         con.executemany("INSERT INTO downloads (id, seconds, at) VALUES (?, ?, ?)",
                         [("a", 30.0, 1), ("b", 40.0, 2), ("c", 50.0, 3)])
     assert store.retry_after() == 40
-    store._queued.update({"x", "y", "z"})                   # 3 queued over 2 jobs: two rounds
+    queue(store, "x", "y", "z")                             # 3 queued, in any worker, over 2 slots: two rounds
     assert store.retry_after() == 80
-    store._queued.update({str(i) for i in range(20)})
+    queue(store, *(str(i) for i in range(20)))
     assert store.retry_after() == 120                       # capped
+    queue(store, "old", at=1.0)                             # a dead worker's row counts for nothing
+    assert store.queued() == 23
+
+
+def test_downloads_take_one_of_the_slots_shared_by_every_worker(store):
+    other = Store(str(store.data), str(store.state), store.url, store.jobs, store.budget, store.min_free)
+    held, entered = threading.Event(), threading.Event()
+
+    def hold():
+        with store.download_slot():
+            held.set()
+            entered.wait(5)
+    hogs = [threading.Thread(target=hold) for _ in range(store.jobs)]   # every slot taken
+    for t in hogs:
+        t.start()
+    held.wait(5)
+    time.sleep(0.2)
+    got = []
+    late = threading.Thread(target=lambda: (other.download_slot().__enter__(), got.append(time.time())))
+    late.start()
+    time.sleep(0.5)
+    assert not got                                          # another worker waits for a slot
+    entered.set()
+    late.join(5)
+    assert got
+    for t in hogs:
+        t.join(5)
+
+
+def test_reconcile_forgets_the_queue_of_workers_that_are_gone(store):
+    queue(store, "602_5554")
+    store.reconcile(KNOWN)
+    assert store.queued() == 0
 
 
 def test_reconcile_follows_the_disk(store):
@@ -262,3 +302,36 @@ def test_white_is_imagery_not_nodata(monkeypatch):
     overview.update(Cfg, ["/data/602_5554.jp2"])
     warp = runs[0]
     assert warp[0] == "gdalwarp" and "-srcnodata" not in warp and "-dstalpha" in warp
+
+
+# --- the busy places fetched ahead ----------------------------------------------------------------------
+
+def places(tmp_path, *rows):
+    f = tmp_path / "places.json"
+    f.write_text(__import__("json").dumps({"places": [dict(zip(("name", "lat", "lon", "population"), r)) for r in rows]}))
+    return f
+
+
+def test_the_plan_is_the_largest_places_first_each_nearest_first_within_the_budget(tmp_path):
+    f = places(tmp_path, ("Small", 50.21, 15.83, 20_000), ("Big", 49.19, 16.61, 400_000))
+    todo = prefetch.plan(KNOWN, 1e15, f)
+    assert len(todo) == len(set(todo)) and todo[0] in S.ids_in_box(prefetch._to_tm33.transform(16.61, 49.19) * 2, KNOWN)
+    big, small = prefetch.radius_m(400_000), prefetch.radius_m(20_000)
+    assert big == 12_000 and small == 3_000                  # clamped: 2 km x sqrt(pop / 10,000)
+    n_big = sum(1 for _ in prefetch.plan(KNOWN, 1e15, places(tmp_path, ("Big", 49.19, 16.61, 400_000))))
+    assert 110 < n_big < 160 and all(sid in KNOWN for sid in todo)   # ~pi r^2 / 4 km^2 and its rim
+    assert prefetch.plan(KNOWN, 10 * prefetch.SHEET_BYTES, f) == todo[:10]
+
+
+def test_prefetch_fetches_one_sheet_when_idle_and_none_while_a_tile_waits(store):
+    todo = ["608_5554", "602_5554", "604_5554"]              # the first is not on the server
+    queue(store, "x")
+    assert prefetch.step(store, todo) is None               # a tile's download is queued: wait
+    with store._db() as con:
+        con.execute("DELETE FROM queue")
+    assert prefetch.step(store, todo) == "608_5554"         # tried, failed, recorded
+    assert prefetch.step(store, todo) == "602_5554" and store.jp2("602_5554").exists()
+    assert prefetch.step(store, todo) == "604_5554"
+    assert prefetch.step(store, todo) is None and store.queued() == 0   # done (the failed one held off)
+    store.min_free = 10 ** 18
+    assert prefetch.step(store, ["602_5556"]) is None       # fetching has stopped

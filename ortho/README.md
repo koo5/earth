@@ -28,8 +28,9 @@ a tile server that held all ~1.5 TB of sheets.
   kilometres: `602_5554` covers E 602000-604000, N 5554000-5556000. The data is EPSG:3045, treated
   as EPSG:25833 (the same projection, east-north axis order). So the sheets under a tile are
   arithmetic on the tile's box (`app/sheets.py`), with 2 m to spare for the resampling.
-- **Fetching** (`app/store.py`): `<id>.zip` (~75 MB) from `SHEETS_URL`, several at once, a lock
-  per sheet so two requests fetch it once. The sidecars are published first and the `.jp2` last by
+- **Fetching** (`app/store.py`): `<id>.zip` (~75 MB) from `SHEETS_URL`, at most `FETCH_JOBS` at once
+  across all workers (a lock file per slot: ČÚZK gives one sheet 1 to 8.5 MB/s, so more at once only
+  makes every sheet late together), a lock per sheet so two requests fetch it once. The sidecars are published first and the `.jp2` last by
   an atomic rename, so a reader never sees half a sheet. A sheet that is not there (404) is not
   retried; another failure is, up to four tries.
 - **Rendering:** a detail tile is drawn only once every sheet under it is on disk. Until then its
@@ -46,6 +47,11 @@ a tile server that held all ~1.5 TB of sheets.
   more is fetched: a tile that needs a sheet not held is a 503, `/status` says `"full": true`, and
   what is held still serves. A few fetches in flight may pass the line together.
 - **Updates:** a held sheet stays as it was fetched; ČÚZK's newer imagery of it is not fetched again.
+- **Fetched ahead** (`app/prefetch.py`): while no tile's download is queued in any worker, one sheet at a
+  time of the busy places: `app/places.json` (`make_places.py`: OpenStreetMap's cities and towns of
+  20,000+, ODbL, © OpenStreetMap contributors), largest first, each within 2 km × √(population /
+  10,000) of its centre (3 to 12 km), nearest first, the plan cut at `PREFETCH_GB` (~90 GB covers the
+  59). A viewer's sheets never wait behind these.
 
 ## The overview (zooms below 15)
 
@@ -58,7 +64,8 @@ of the overview zooms over them are deleted.
 
 Never per sheet: an update runs when at least `OV_MIN_SHEETS` sheets wait and none arrived for
 `OV_QUIET_S` (a burst of browsing settles first), or when the oldest has waited `OV_MAX_AGE_S`
-(a trickle still gets in). The background maintainer checks every `MAINTAIN_S`.
+(a trickle still gets in). The background maintainer checks every `MAINTAIN_S`. Its GDAL steps run at
+`nice 15`, so the tile renders beside them come first.
 
 The crossover is checked at start: zoom 15 must be the first zoom drawn from the sheets at every
 Czech latitude, under both of MapServer's pixel conventions, or the service refuses to start. Only
@@ -99,7 +106,8 @@ fetching its sheets and cache it for good. Any other `/wmts/` path is a 404.
 | variable | default | what |
 |---|---|---|
 | `SHEETS_URL` | `https://openzu.cuzk.gov.cz/opendata/OI` | where `<id>.zip` is fetched from (a `file://` directory works: the tests) |
-| `FETCH_JOBS` | `4` | sheets downloaded at once by one worker |
+| `FETCH_JOBS` | `4` | sheets downloaded at once, across all workers |
+| `PREFETCH_GB`, `PREFETCH_IDLE_S` | `100`, `10` | the busy places fetched ahead while idle (`0`: none), and how often it looks |
 | `SHEET_BUDGET_GB` | `450` | disk for held sheets (~6,000, ~30% of Czechia); past it nothing is fetched |
 | `MIN_FREE_GB` | `50` | and nothing either while the disk has less free than this |
 | `OV_MIN_SHEETS`, `OV_QUIET_S`, `OV_MAX_AGE_S` | `8`, `300`, `3600` | the overview's hysteresis |
@@ -129,11 +137,12 @@ The compose service `ortho` in `../deploy/compose.yml`, with `/data`, `/state` a
 | `app/sheets.py` | sheet ids, boxes, the sheets under a tile, the detail zoom |
 | `app/store.py` | fetching, the index, the record, the budget |
 | `app/overview.py` | the hysteresis, creating and updating the overview, the cached tiles to drop |
-| `app/serve.py` | the maintainer thread and the gunicorn child |
+| `app/serve.py` | the maintainer and prefetch threads, and the gunicorn child |
 | `app/wsgi.py` | `/map`, `/status`, and the tile route behind the sheet fetch, with its cost |
 | `app/config.py` | the environment, and the one source of the mapfile and `mapproxy.yaml` |
 | `app/build.py` | GDAL steps with progress lines, and the build lock |
 | `app/templates/oi.map.tmpl` | the MapServer mapfile |
 | `app/sheets.txt`, `make_sheets.py` | the sheets that exist, and how the list is made |
+| `app/prefetch.py`, `app/places.json`, `make_places.py` | the busy places fetched ahead while idle, and how the list is made |
 | `tests/` | unit tests and a container suite (`tests/README.md`) |
 | `Dockerfile`, `requirements.{in,txt}` | Debian trixie (GDAL 3.10 with JP2OpenJPEG) with MapServer 8.6 from trixie-backports, MapProxy + gunicorn pinned with hashes |

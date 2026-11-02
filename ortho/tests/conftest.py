@@ -53,6 +53,8 @@ def server():
               "-e", "SHEETS_URL=file:///src",
               # the overview takes a sheet at once here, so the low-zoom test sees it
               "-e", "OV_MIN_SHEETS=1", "-e", "OV_QUIET_S=0", "-e", "MAINTAIN_S=2",
+              # no prefetch here: its source holds one sheet, and the plan is the busy towns (test_units has it)
+              "-e", "PREFETCH_GB=0",
               IMAGE)
     assert run.returncode == 0, f"container start failed:\n{run.stderr}"
 

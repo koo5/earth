@@ -12,6 +12,9 @@ fetching stops and a tile that needs a sheet not held is refused; more storage i
 - A tile never waits for its sheets on the request (begin): their downloads start in the background and the
   tile is answered "come back in N s" at once (recon pl04: a request that held a worker for minutes held
   every cached tile behind it, and gunicorn killed it at 120 s).
+- At most FETCH_JOBS downloads run at once across all workers (a slot is a lock file), so on a slow ČÚZK the
+  first sheets land early instead of all of them late together (pl04: 16 at once, all 111-152 s). The queue
+  table holds every download queued or running, in any worker: Retry-After and the prefetcher read it.
 """
 from __future__ import annotations
 
@@ -45,8 +48,10 @@ class StoreFull(RuntimeError):
 # a sheet whose download failed answers that failure for this long before it is tried again (in every worker:
 # the failure is recorded in sheets.sqlite), so a sheet ČÚZK does not have is a 502, not a 503 for ever
 FAIL_HOLD_S = 300
-# Retry-After for a waiting tile: the median of recent downloads, times the queue ahead of it here
+# Retry-After for a waiting tile: the median of recent downloads, times the server's queue over its slots
 RETRY_MIN_S, RETRY_MAX_S, RETRY_FIRST_S = 5, 120, 20
+# a queue row older than this is a worker that died mid-download (rows are also cleared at start)
+QUEUE_STALE_S = 1800
 
 
 class Store:
@@ -66,6 +71,7 @@ class Store:
             con.execute("CREATE TABLE IF NOT EXISTS downloads (id TEXT NOT NULL, seconds REAL NOT NULL, at REAL NOT NULL)")
             con.execute("CREATE TABLE IF NOT EXISTS failures (id TEXT PRIMARY KEY, kind TEXT NOT NULL, "
                         "detail TEXT NOT NULL, at REAL NOT NULL)")
+            con.execute("CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, by TEXT NOT NULL, at REAL NOT NULL)")
         self._queued: set[str] = set()                  # this process's background downloads, queued or running
         self._queued_lock = threading.Lock()
         self._pool: ThreadPoolExecutor | None = None
@@ -85,6 +91,29 @@ class Store:
         with open(self.data / ".locks" / f"{name}.lock", "a") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             yield
+
+    @contextlib.contextmanager
+    def download_slot(self):
+        """One of FETCH_JOBS download slots, shared by every worker (a lock file each), waited for."""
+        while True:
+            for i in range(max(1, self.jobs)):
+                fh = open(self.data / ".locks" / f"download-{i}.lock", "a")
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    fh.close()
+                    continue
+                try:
+                    yield
+                finally:
+                    fh.close()                          # closing releases the lock
+                return
+            time.sleep(0.2)
+
+    def queued(self) -> int:
+        """Downloads queued or running, in every worker (and the prefetcher)."""
+        with self._db() as con:
+            return con.execute("SELECT COUNT(*) FROM queue WHERE at > ?", (time.time() - QUEUE_STALE_S,)).fetchone()[0]
 
     def jp2(self, sid: str) -> Path:
         return self.data / f"{sid}.jp2"
@@ -108,12 +137,10 @@ class Store:
         missing = [s for s in sorted(set(ids)) if not self.jp2(s).exists()]
         if not missing:
             return None
-        with self._db() as con:
-            q = ",".join("?" * len(missing))
-            failed = con.execute(f"SELECT id, kind, detail FROM failures WHERE id IN ({q}) AND at > ?",
-                                 (*missing, time.time() - FAIL_HOLD_S)).fetchone()
-        if failed:
-            raise (StoreFull if failed[1] == "full" else SheetMissing)(failed[2])
+        for sid in missing:
+            failed = self.failed_lately(sid)
+            if failed:
+                raise (StoreFull if failed[0] == "full" else SheetMissing)(failed[1])
         if self.full():
             raise StoreFull(f"sheet storage full ({self.held_bytes() / 1e9:.0f} GB held, budget "
                             f"{self.budget / 1e9:.0f} GB): {', '.join(missing)} not fetched")
@@ -123,19 +150,27 @@ class Store:
                 if sid in self._queued or self._in_flight(sid):
                     continue
                 self._queued.add(sid)
+            with self._db() as con:
+                con.execute("INSERT OR REPLACE INTO queue (id, by, at) VALUES (?, ?, ?)", (sid, "tile", time.time()))
             if self._pool is None:
                 self._pool = ThreadPoolExecutor(max(1, self.jobs), thread_name_prefix="sheets")
             self._pool.submit(self._background, sid)
             started += 1
         return started, self.retry_after()
 
+    def failed_lately(self, sid: str) -> tuple[str, str] | None:
+        """(kind, detail) of the sheet's download failure in the last FAIL_HOLD_S, any worker's."""
+        with self._db() as con:
+            return con.execute("SELECT kind, detail FROM failures WHERE id = ? AND at > ?",
+                               (sid, time.time() - FAIL_HOLD_S)).fetchone()
+
     def retry_after(self) -> int:
         """Seconds a waiting tile is told to come back in: the median of the last downloads, times the
-        queue in this worker over its parallel downloads."""
+        server's queue over its download slots."""
         with self._db() as con:
             recent = [r[0] for r in con.execute("SELECT seconds FROM downloads ORDER BY at DESC LIMIT 9")]
         each = statistics.median(recent) if recent else RETRY_FIRST_S
-        rounds = math.ceil(max(1, len(self._queued)) / max(1, self.jobs))
+        rounds = math.ceil(max(1, self.queued()) / max(1, self.jobs))
         return int(min(RETRY_MAX_S, max(RETRY_MIN_S, math.ceil(each * rounds))))
 
     def _in_flight(self, sid: str) -> bool:
@@ -149,21 +184,34 @@ class Store:
             return False
 
     def _background(self, sid: str) -> None:
-        t = time.time()
         try:
+            self.download(sid)
+        finally:
+            with self._queued_lock:
+                self._queued.discard(sid)
+
+    def download(self, sid: str, by: str = "tile") -> bool:
+        """Fetch one sheet now (a slot waited for), recording how long it took, or its failure for the next ask
+        in any worker; whether it arrived. Queued in the queue table while it runs."""
+        with self._db() as con:
+            con.execute("INSERT OR REPLACE INTO queue (id, by, at) VALUES (?, ?, ?)", (sid, by, time.time()))
+        try:
+            t = time.time()
             if self.ensure([sid]):
                 with self._db() as con:
                     con.execute("INSERT INTO downloads (id, seconds, at) VALUES (?, ?, ?)", (sid, time.time() - t, time.time()))
                     con.execute("DELETE FROM failures WHERE id = ?", (sid,))
+            return self.jp2(sid).exists()
         except Exception as e:  # noqa: BLE001 -- recorded for the next ask of it, in any worker
             kind = "full" if isinstance(e, StoreFull) else "missing"
             with self._db() as con:
                 con.execute("INSERT OR REPLACE INTO failures (id, kind, detail, at) VALUES (?, ?, ?, ?)",
                             (sid, kind, str(e)[:500], time.time()))
             print(f"[sheets] {sid} failed: {e}", flush=True)
+            return False
         finally:
-            with self._queued_lock:
-                self._queued.discard(sid)
+            with self._db() as con:
+                con.execute("DELETE FROM queue WHERE id = ?", (sid,))
 
     def full(self) -> bool:
         """At the budget, or the disk's free space below the reserve (it is shared with the rest of earth)."""
@@ -197,7 +245,8 @@ class Store:
             tmp = Path(tempfile.mkdtemp(prefix=f"{sid}-", dir=self.data / ".tmp"))
             try:
                 zpath = tmp / f"{sid}.zip"
-                download(f"{self.url}/{sid}.zip", zpath)
+                with self.download_slot():
+                    download(f"{self.url}/{sid}.zip", zpath)
                 with zipfile.ZipFile(zpath) as z:
                     names = set(z.namelist())
                     if f"{sid}.jp2" not in names or f"{sid}.j2w" not in names:
@@ -236,6 +285,8 @@ class Store:
         the overview again); a row without its sheet goes; leftovers of interrupted fetches go."""
         shutil.rmtree(self.data / ".tmp", ignore_errors=True)
         (self.data / ".tmp").mkdir()
+        with self._db() as con:
+            con.execute("DELETE FROM queue")              # no worker runs yet: what was queued died with them
         on_disk = {p.stem for p in self.data.glob("*.jp2") if p.stem in known}
         with self._db() as con:
             rows = {r[0] for r in con.execute("SELECT id FROM sheets")}

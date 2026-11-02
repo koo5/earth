@@ -1,0 +1,359 @@
+{
+"source": "names-cz-2026-10-31.json: OpenStreetMap place nodes, ODbL, (c) OpenStreetMap contributors; population >= 20000",
+"places": [
+{
+"name": "Praha",
+"lat": 50.0874654,
+"lon": 14.4212535,
+"population": 1275406
+},
+{
+"name": "Brno",
+"lat": 49.1922443,
+"lon": 16.6113382,
+"population": 379466
+},
+{
+"name": "Ostrava",
+"lat": 49.8354045,
+"lon": 18.292978,
+"population": 279791
+},
+{
+"name": "Plzeň",
+"lat": 49.7477415,
+"lon": 13.3775249,
+"population": 185599
+},
+{
+"name": "Liberec",
+"lat": 50.7702648,
+"lon": 15.0583947,
+"population": 102951
+},
+{
+"name": "Olomouc",
+"lat": 49.5940567,
+"lon": 17.251143,
+"population": 99496
+},
+{
+"name": "České Budějovice",
+"lat": 48.9747357,
+"lon": 14.474285,
+"population": 93426
+},
+{
+"name": "Hradec Králové",
+"lat": 50.2092113,
+"lon": 15.8327512,
+"population": 90596
+},
+{
+"name": "Ústí nad Labem",
+"lat": 50.6603327,
+"lon": 14.0381357,
+"population": 90378
+},
+{
+"name": "Pardubice",
+"lat": 50.0385812,
+"lon": 15.7791356,
+"population": 88520
+},
+{
+"name": "Zlín",
+"lat": 49.226766,
+"lon": 17.6667415,
+"population": 72973
+},
+{
+"name": "Havířov",
+"lat": 49.7801136,
+"lon": 18.4368451,
+"population": 69084
+},
+{
+"name": "Kladno",
+"lat": 50.1466053,
+"lon": 14.1026398,
+"population": 66903
+},
+{
+"name": "Most",
+"lat": 50.5032737,
+"lon": 13.636112,
+"population": 62866
+},
+{
+"name": "Opava",
+"lat": 49.9389004,
+"lon": 17.9024174,
+"population": 54840
+},
+{
+"name": "Frýdek-Místek",
+"lat": 49.685635,
+"lon": 18.3483416,
+"population": 53899
+},
+{
+"name": "Jihlava",
+"lat": 49.396064,
+"lon": 15.5903065,
+"population": 50108
+},
+{
+"name": "Karviná",
+"lat": 49.8542719,
+"lon": 18.5416556,
+"population": 49881
+},
+{
+"name": "Karlovy Vary",
+"lat": 50.2306216,
+"lon": 12.8701437,
+"population": 49353
+},
+{
+"name": "Teplice",
+"lat": 50.6406644,
+"lon": 13.8244461,
+"population": 48766
+},
+{
+"name": "Děčín",
+"lat": 50.7824196,
+"lon": 14.2147221,
+"population": 47029
+},
+{
+"name": "Chomutov",
+"lat": 50.4606456,
+"lon": 13.4178324,
+"population": 46263
+},
+{
+"name": "Jablonec nad Nisou",
+"lat": 50.7240899,
+"lon": 15.1710958,
+"population": 44588
+},
+{
+"name": "Prostějov",
+"lat": 49.4721467,
+"lon": 17.1117979,
+"population": 43055
+},
+{
+"name": "Mladá Boleslav",
+"lat": 50.4116187,
+"lon": 14.9031301,
+"population": 41868
+},
+{
+"name": "Přerov",
+"lat": 49.4554294,
+"lon": 17.4508782,
+"population": 41404
+},
+{
+"name": "Česká Lípa",
+"lat": 50.6865452,
+"lon": 14.5372974,
+"population": 36740
+},
+{
+"name": "Třebíč",
+"lat": 49.2158752,
+"lon": 15.8810841,
+"population": 34415
+},
+{
+"name": "Třinec",
+"lat": 49.6779212,
+"lon": 18.6711993,
+"population": 34222
+},
+{
+"name": "Tábor",
+"lat": 49.4141533,
+"lon": 14.6587234,
+"population": 33410
+},
+{
+"name": "Znojmo",
+"lat": 48.8554341,
+"lon": 16.0489457,
+"population": 33370
+},
+{
+"name": "Kolín",
+"lat": 50.0288894,
+"lon": 15.2011571,
+"population": 32046
+},
+{
+"name": "Příbram",
+"lat": 49.6901444,
+"lon": 14.0103663,
+"population": 31651
+},
+{
+"name": "Cheb",
+"lat": 50.0793562,
+"lon": 12.370353,
+"population": 30420
+},
+{
+"name": "Písek",
+"lat": 49.3087554,
+"lon": 14.1476532,
+"population": 29814
+},
+{
+"name": "Šumperk",
+"lat": 49.9655521,
+"lon": 16.9705651,
+"population": 29490
+},
+{
+"name": "Vsetín",
+"lat": 49.3389775,
+"lon": 17.9961534,
+"population": 28785
+},
+{
+"name": "Orlová",
+"lat": 49.8459427,
+"lon": 18.4309274,
+"population": 28206
+},
+{
+"name": "Hodonín",
+"lat": 48.8563914,
+"lon": 17.1234655,
+"population": 27361
+},
+{
+"name": "Kroměříž",
+"lat": 49.2984191,
+"lon": 17.3929804,
+"population": 26954
+},
+{
+"name": "Valašské Meziříčí",
+"lat": 49.4716056,
+"lon": 17.971593,
+"population": 25413
+},
+{
+"name": "Krnov",
+"lat": 50.089894,
+"lon": 17.7040842,
+"population": 25211
+},
+{
+"name": "Sokolov",
+"lat": 50.1809097,
+"lon": 12.6394986,
+"population": 24916
+},
+{
+"name": "Litoměřice",
+"lat": 50.5340795,
+"lon": 14.1317985,
+"population": 24879
+},
+{
+"name": "Havlíčkův Brod",
+"lat": 49.606942,
+"lon": 15.5795748,
+"population": 23101
+},
+{
+"name": "Chrudim",
+"lat": 49.9511458,
+"lon": 15.7947559,
+"population": 23002
+},
+{
+"name": "Strakonice",
+"lat": 49.261277,
+"lon": 13.9025043,
+"population": 22888
+},
+{
+"name": "Český Těšín",
+"lat": 49.7464018,
+"lon": 18.6260976,
+"population": 22347
+},
+{
+"name": "Klatovy",
+"lat": 49.3951183,
+"lon": 13.2935954,
+"population": 22288
+},
+{
+"name": "Uherské Hradiště",
+"lat": 49.0681018,
+"lon": 17.4663899,
+"population": 21737
+},
+{
+"name": "Jindřichův Hradec",
+"lat": 49.1443265,
+"lon": 15.003354,
+"population": 21460
+},
+{
+"name": "Kopřivnice",
+"lat": 49.598913,
+"lon": 18.1452134,
+"population": 21160
+},
+{
+"name": "Žďár nad Sázavou",
+"lat": 49.5629014,
+"lon": 15.9391924,
+"population": 20994
+},
+{
+"name": "Nový Jičín",
+"lat": 49.594881,
+"lon": 18.0102584,
+"population": 20644
+},
+{
+"name": "Kutná Hora",
+"lat": 49.9486561,
+"lon": 15.2681123,
+"population": 20536
+},
+{
+"name": "Mělník",
+"lat": 50.3520785,
+"lon": 14.4748281,
+"population": 20350
+},
+{
+"name": "Brandýs nad Labem-Stará Boleslav",
+"lat": 50.1912412,
+"lon": 14.6649786,
+"population": 20313
+},
+{
+"name": "Jirkov",
+"lat": 50.5000597,
+"lon": 13.4476266,
+"population": 20239
+},
+{
+"name": "Náchod",
+"lat": 50.4167025,
+"lon": 16.1622871,
+"population": 20011
+}
+]
+}

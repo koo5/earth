@@ -11,6 +11,7 @@ import threading
 import time
 
 import overview
+import prefetch
 import sheets as S
 from build import build_lock
 from store import Store
@@ -47,8 +48,23 @@ def _maintain(cfg, known) -> None:
         time.sleep(cfg.maintain_s)
 
 
+def _prefetch(cfg, known) -> None:
+    store = Store.of(cfg)
+    todo = prefetch.plan(known, cfg.prefetch_bytes)
+    print(f"[prefetch] {len(todo)} sheets planned, {sum(store.jp2(s).exists() for s in todo)} held", flush=True)
+    while True:
+        try:
+            if prefetch.step(store, todo) is not None:
+                continue                                   # idle still, maybe: the next one at once
+        except Exception as exc:  # noqa: BLE001 — say it, keep the thread
+            print(f"[prefetch] step failed: {exc}", flush=True)
+        time.sleep(cfg.prefetch_idle_s)
+
+
 def start_maintainer(cfg, known) -> None:
     threading.Thread(target=_maintain, args=(cfg, known), daemon=True).start()
+    if cfg.prefetch_bytes > 0:
+        threading.Thread(target=_prefetch, args=(cfg, known), daemon=True).start()
 
 
 def run_server(cfg) -> int:

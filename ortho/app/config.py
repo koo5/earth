@@ -50,6 +50,8 @@ class Config:
     ov_max_age_s: float
     ov_threads: int
     maintain_s: float
+    prefetch_bytes: float
+    prefetch_idle_s: float
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -69,6 +71,8 @@ class Config:
             crossover=int(os.environ.get("CROSSOVER", "16000")),
             # ČÚZK's open-data sheets, <id>.zip; a file:// directory works too (the tests)
             sheets_url=os.environ.get("SHEETS_URL", "https://openzu.cuzk.gov.cz/opendata/OI"),
+            # downloads at once across all workers: ČÚZK gives ~1-8.5 MB/s a sheet, so more at once only makes
+            # every sheet late together (recon pl04)
             fetch_jobs=int(os.environ.get("FETCH_JOBS", "4")),
             # ~450 GB is ~6,000 sheets, ~30% of Czechia (a 1 TB server's share); past it nothing is fetched
             budget_bytes=int(float(os.environ.get("SHEET_BUDGET_GB", "450")) * 1e9),
@@ -79,6 +83,9 @@ class Config:
             ov_max_age_s=float(os.environ.get("OV_MAX_AGE_S", "3600")),
             ov_threads=int(os.environ.get("OV_THREADS", "2")),
             maintain_s=float(os.environ.get("MAINTAIN_S", "30")),
+            # the busy places' sheets fetched ahead while idle (prefetch.py): ~90 GB holds the 59 towns of 20,000+
+            prefetch_bytes=float(os.environ.get("PREFETCH_GB", "100")) * 1e9,
+            prefetch_idle_s=float(os.environ.get("PREFETCH_IDLE_S", "10")),
         )
 
     # derived paths
