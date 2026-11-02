@@ -66,9 +66,9 @@ services:
     restart: always
     network_mode: host
     environment:
-      # not public yet: only /<EARTH_PREFIX>/... reaches earth; the terrain mosaics are under a secret of
-      # their own, /<EARTH_DEM_PREFIX>/..., which stays secret when earth opens (./Caddyfile)
-      EARTH_PREFIX: ${EARTH_PREFIX:?set EARTH_PREFIX (a long random string) in deploy/.env}
+      # only /<EARTH_PREFIX>/... reaches earth (short, fixed, in the clients' config); the terrain mosaics
+      # are under a secret of their own, /<EARTH_DEM_PREFIX>/... (./Caddyfile)
+      EARTH_PREFIX: ${EARTH_PREFIX:?set EARTH_PREFIX (8 random [a-z0-9]) in deploy/.env}
       EARTH_DEM_PREFIX: ${EARTH_DEM_PREFIX:?set EARTH_DEM_PREFIX (another long random string) in deploy/.env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

@@ -1,11 +1,13 @@
 # Caddy in front of earth on earth.hillview.cz (compose.yml). It runs on the host network: it sees each
 # client's real address and reaches earth on the published loopback port.
 #
-# NOT PUBLIC YET: only /<EARTH_PREFIX>/... reaches earth, with the prefix stripped, so clients use
-# https://earth.hillview.cz/<EARTH_PREFIX> as their base. The terrain mosaics have a secret path of their
-# own, /<EARTH_DEM_PREFIX>/..., which stays secret when earth opens. Everything else is a 404. The API
-# hands out release ids, never URLs, so nothing it says leaks or misses a prefix. No access log: it would
-# write the prefixes down.
+# Only /<EARTH_PREFIX>/... reaches earth, with the prefix stripped, so clients use
+# https://earth.hillview.cz/<EARTH_PREFIX> as their base. The prefix is short, fixed and in the clients'
+# config (never in this repository): it keeps the scanners that find the host (certificate transparency
+# lists it) out of earth's logs and limits; the per-address limits are what protect it once the prefix is
+# known. The terrain mosaics have a path of their own, /<EARTH_DEM_PREFIX>/..., long and secret for good.
+# Anything else has its connection closed with no answer. The API hands out release ids, never URLs, so
+# nothing it says leaks or misses a prefix. No access log: it would write the prefixes down.
 (earth) {
 	# The terrain mosaics as plain files, for a client that reads them itself with GDAL range requests
 	# (/vsicurl/, e.g. a depth renderer): only what earth itself reads, never the LAZ downloads or the
@@ -32,8 +34,9 @@
 		# so the service can believe it from here and nowhere else (limits.client_ip)
 		reverse_proxy 127.0.0.1:8090
 	}
+	# a scanner's guess: closed, no status, no body
 	handle {
-		respond 404
+		abort
 	}
 }
 

@@ -3,8 +3,8 @@
 **earth.hillview.cz**: hillview's public geodata stack. It serves terrain
 for the whole earth (Czechia from ČÚZK's lidar, finest), the Czech orthophoto, OpenStreetMap vector
 tiles and Prague's 3D buildings, for the hillview frontend and hillview's workbench.
-Everything is unauthenticated and rate-limited by IP; until it opens, it answers only under a secret
-path prefix (`https://earth.hillview.cz/<prefix>/...`, `deploy/README.md`).
+Everything is unauthenticated and rate-limited by IP, and answers only under a short fixed path prefix that
+the clients carry (`https://earth.hillview.cz/<prefix>/...`, `deploy/README.md`); anything else is dropped.
 
 
 ## What it serves

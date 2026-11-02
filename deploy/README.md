@@ -13,10 +13,15 @@ names the data relative to the checkout):
     store/      releases, channels, kept tiles, osm/, models/, grids/
     ortho/      the ortho service: sheets/ (JP2, fetched as needed), state/ (index, overview), cache/
 
-`~/earth/src/deploy/.env` (mode 600, never committed) holds the two secrets:
+`~/earth/src/deploy/.env` (mode 600, never committed) holds the two path prefixes:
 
-    EARTH_PREFIX=<openssl rand -hex 24>       # earth's path prefix until it opens: https://earth.hillview.cz/<prefix>/...
-    EARTH_DEM_PREFIX=<openssl rand -hex 24>   # the terrain mosaics' own path, secret for good
+    EARTH_PREFIX=<tr -dc a-z0-9 </dev/urandom | head -c 8>   # earth's base, https://earth.hillview.cz/<prefix>/...
+    EARTH_DEM_PREFIX=<openssl rand -hex 24>                  # the terrain mosaics' own path, secret for good
+
+EARTH_PREFIX is fixed and goes into the clients' config, so it is public to anyone who looks at a client.
+What it keeps out is the scanners that find the host: anything outside it has its connection closed,
+unanswered. It stays out of this repository, so a search there does not hand it out. Changing it breaks the
+clients; if it ever must change, serve the old and new side by side until they have moved.
 
 Deploy: `cd ~/earth/src && git pull --ff-only && cd deploy && podman compose up -d --build` (earth, ortho and
 Caddy; the builder is a one-shot, `podman compose run --rm builder`). At boot `podman-restart.service`
