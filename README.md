@@ -74,9 +74,11 @@ osm/build.sh ~/earth/osm-build
 mv ~/earth/osm-build/czech-republic-<date>.pmtiles ~/earth/store/osm/
 earth release register osm osm-cz-<extract date> --pmtiles czech-republic-<date>.pmtiles
 
-# names: after osm/build.sh (it downloads the extract); heights from this machine's mosaics
+# names: from the extract the map was built from (osm/build.sh downloads it; Geofabrik keeps dated ones,
+# czech-republic-<yymmdd>.osm.pbf, into sources/czech-republic.osm.pbf); heights from this machine's mosaics.
+# The export is not mounted in the earth container: give it on stdin.
 osm/names.sh ~/earth/osm-build
-earth names build /osm-build/czech-republic-names.geojsonseq --out /var/lib/earth/names/names-cz-<date>.json
+earth names build /dev/stdin --out /var/lib/earth/names/names-cz-<date>.json < ~/earth/osm-build/czech-republic-names.geojsonseq
 earth release register names names-cz-<date> --names names-cz-<date>.json
 
 # city models: the EGM96 grid once, then each area (prints its sha256), then a release of areas
