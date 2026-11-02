@@ -156,8 +156,12 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
         the models give them (orthometric), not the tiles' ellipsoidal ones. Nothing is fetched
         here: a not_fetched point waits for whoever builds the mosaics.
 
-        -> {release, want, vertical, heights, src, status, counts, sources, points (box only)}
-        `heights[i]` is null unless `status[i]` is "ok"."""
+        -> {release, want, stamp, vertical, heights, src, status, counts, sources, points (box only)}
+        `heights[i]` is null unless `status[i]` is "ok". `stamp` names the mosaics the heights were read from
+        (store.stamp_key of tiles.source_stamp(want)): for a frozen release its registered one, for a live one
+        what was on disk then, so a caller can record which terrain a height came from (RESEARCH3's ea10). A
+        live release's mosaics rebuilt during the query make it a 503, Retry-After 1: never heights under a
+        stamp they were not all read from."""
         lim().check_read(request)
         r = _terrain_release(rid)
         if (q.points is None) == (q.bbox is None):
@@ -185,12 +189,16 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
                 raise HTTPException(409, f"the {q.want} mosaics changed since release {rid} was "
                                          f"registered; ask a newer release")
         async with lim().making:
+            stamp = store_mod.stamp_key(tiles.source_stamp(q.want))
             try:
                 g = await run_in_threadpool(ground_mod.sample_ground, [p[0] for p in pts],
                                             [p[1] for p in pts], q.want, single_source=q.single_source)
             except ground_mod.GroundConfigError as e:
                 raise HTTPException(503, str(e))
-        out = {"release": rid, "want": q.want, "vertical": "orthometric",
+            if store_mod.stamp_key(tiles.source_stamp(q.want)) != stamp:
+                raise HTTPException(503, f"the {q.want} mosaics changed during this query; ask again",
+                                    headers={"Retry-After": "1"})
+        out = {"release": rid, "want": q.want, "stamp": stamp, "vertical": "orthometric",
                "heights": [round(float(h), 3) if st == "ok" else None for h, st in zip(g.height, g.status)],
                "src": g.src, "status": g.status, "counts": g.counts(), "sources": g.sources()}
         if q.bbox is not None:

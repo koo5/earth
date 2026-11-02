@@ -146,3 +146,29 @@ def test_a_frozen_release_answers_ground_only_from_its_own_mosaics(svc, world):
     os.utime(world / "dtm10.vrt", (st_.st_atime, st_.st_mtime + 100))
     r = c.post("/t/terrain-a/terrain/ground", json={"points": [[14.0105, 50.0105]]})
     assert r.status_code == 409 and "newer release" in r.text
+
+
+def test_a_ground_answer_names_the_mosaics_its_heights_were_read_from(svc, world, monkeypatch):
+    """RESEARCH3's ea10: every height a run is given names its terrain. A frozen release answers its registered
+    stamp; a live one what is on disk then; a rebuild during the query is a 503, never a stamp it was not read from."""
+    import os
+    c, s = svc
+    q = {"points": [[14.0105, 50.0105]]}
+    r = c.post("/t/terrain-a/terrain/ground", json=q).json()
+    assert r["stamp"] == store.stamp_key(s.release("terrain-a").sources["bare"])
+    s.register("terrain-live", "terrain", {}, "test", mode="live")
+    before = c.post("/t/terrain-live/terrain/ground", json=q).json()["stamp"]
+    assert before == r["stamp"]
+    vrt = str(world / "dtm10.vrt")
+    os.utime(vrt, (1, 1))                                       # the mosaic rebuilt
+    after = c.post("/t/terrain-live/terrain/ground", json=q).json()["stamp"]
+    assert after != before
+    real = app_mod.ground_mod.sample_ground
+
+    def rebuilt_meanwhile(*a, **k):
+        g = real(*a, **k)
+        os.utime(vrt, (2, 2))
+        return g
+    monkeypatch.setattr(app_mod.ground_mod, "sample_ground", rebuilt_meanwhile)
+    r = c.post("/t/terrain-live/terrain/ground", json=q)
+    assert r.status_code == 503 and r.headers["retry-after"] == "1"
