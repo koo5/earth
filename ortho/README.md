@@ -133,4 +133,4 @@ The compose service `ortho` in `../deploy/compose.yml`, with `/data`, `/state` a
 | `app/templates/oi.map.tmpl` | the MapServer mapfile |
 | `app/sheets.txt`, `make_sheets.py` | the sheets that exist, and how the list is made |
 | `tests/` | unit tests and a container suite (`tests/README.md`) |
-| `Dockerfile`, `requirements.{in,txt}` | Ubuntu 24.04 (MapServer 8, GDAL with JP2OpenJPEG), MapProxy + gunicorn pinned with hashes |
+| `Dockerfile`, `requirements.{in,txt}` | Debian trixie (GDAL 3.10 with JP2OpenJPEG) with MapServer 8.6 from trixie-backports, MapProxy + gunicorn pinned with hashes |

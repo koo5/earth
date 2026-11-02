@@ -24,7 +24,7 @@ dev = [
 [tool.uv]
 # the 14-day dependency cooloff the other hillview repos keep: nothing published after this date
 # resolves. Move it forward deliberately (it is a date, not a window).
-exclude-newer = "2026-09-29T00:00:00Z"
+exclude-newer = "2026-10-19T00:00:00Z"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
