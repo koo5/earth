@@ -25,6 +25,7 @@ def test_warp_cmd_square_metric_cells():
     assert cmd[cmd.index("-t_srs") + 1] == "EPSG:4326"
     assert cmd[cmd.index("-s_srs") + 1] == "EPSG:5514+8357"
     assert cmd[cmd.index("-r") + 1] == "max"
+    assert "-novshift" in cmd     # heights stay Bpv: GDAL 3.13 + PROJ network made them ellipsoidal
 
 
 def test_warp_cmd_no_s_srs_by_default():

@@ -23,7 +23,9 @@ Typical ČÚZK + Copernicus flow (open data, CC BY 4.0):
   # → export TERRAIN_DSM_PATH="mosaic/dsm10.vrt@15000:mosaic/dsm_far.vrt"
   #   export TERRAIN_DTM_PATH="mosaic/dtm10.vrt@15000"
 
-Vertical datum note: Bpv (orthometric) heights pass through untouched — the
+Vertical datum note: Bpv (orthometric) heights pass through untouched (-novshift:
+a GDAL that sees the source's vertical CRS, with PROJ's network on, otherwise turns
+them ellipsoidal, +44 m over Czechia; earth adds the geoid itself) — the
 renderer only compares heights against each other, so a CONSISTENT vertical
 datum is what matters. GLO-30 is EGM2008-referenced, close enough to Bpv for
 far-field skylines (decimetres). GPS-altitude datum handling is the worker's
@@ -76,7 +78,7 @@ def warp_cmd(src: Path, dst: Path, res_m: float, mid_lat: float,
     dlon = res_m / (M_PER_DEG_LAT * max(0.1, math.cos(math.radians(mid_lat))))
     # -of: the output is written under a .part name first (_each_sheet), which names no format
     cmd = ["gdalwarp", "-of", "GTiff", "-t_srs", "EPSG:4326", "-tr", f"{dlon:.10f}", f"{dlat:.10f}",
-           "-r", resampling, "-dstnodata", "-9999",
+           "-r", resampling, "-dstnodata", "-9999", "-novshift",
            "-co", "COMPRESS=DEFLATE", "-co", "PREDICTOR=2", "-co", "TILED=YES",
            "-overwrite"]
     if s_srs:
