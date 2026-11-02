@@ -147,9 +147,15 @@ Geoid = Callable[[np.ndarray, np.ndarray], np.ndarray]
 
 
 def surface_heights(lons: np.ndarray, lats: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """The surface model's orthometric heights at the points, and which it had."""
+    """The surface model's orthometric heights at the points, and which it had. Refuses when any lies under a ČÚZK
+    sheet not built on this machine: a release made there would leave out every name it could not place (on dev44,
+    2026-11-02, 14,256 of 25,174), and nothing in it would say so. Build names where the surface is complete."""
     from . import ground
     g = ground.sample_ground(lons, lats, ground.TERRAIN_SURFACE)
+    c = g.counts()
+    if c["not_fetched"]:
+        raise NamesError(f"{c['not_fetched']} of {len(lons)} names without an ele lie under surface sheets not built "
+                         f"here ({ground.TERRAIN_SURFACE}): build the names where the mosaics are complete")
     return g.height, g.ok
 
 

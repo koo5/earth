@@ -103,3 +103,18 @@ def test_a_release_is_one_frozen_file_served_as_the_labels_api_answers(built):
     assert body["labels"][0] == {"name": "p3", "lat": 50.08, "lon": 14.462, "kind": "peak", "ele": 203.0, "h": 248.0}
     assert c.get("/t/nope/names", params={"lat": 50, "lon": 14}).status_code == 404
     assert c.get("/t/names-cz/names", params={"lat": 95, "lon": 14}).status_code == 422
+
+
+def test_a_build_refuses_a_surface_that_is_not_built_here(monkeypatch):
+    from earth import ground
+
+    class G:
+        height, ok = np.array([np.nan]), np.array([False])
+
+        @staticmethod
+        def counts():
+            return {"ok": 0, "not_fetched": 1, "outside": 0, "nodata": 0, "mixed": 0}
+
+    monkeypatch.setattr(ground, "sample_ground", lambda lons, lats, want: G)
+    with pytest.raises(names.NamesError, match="not built here"):
+        names.surface_heights(np.array([14.0]), np.array([50.0]))
