@@ -40,6 +40,9 @@ ENV DATA_DIR=/data \
     WORKERS=4
 
 COPY app/ /app/
+# MapServer 8 loads a mapfile by path only when it matches this gate; the entrypoint writes the mapfile to
+# config.GEN_DIR, a tmpfs, so the root filesystem can be read-only
+RUN printf 'CONFIG\n  ENV\n    "MS_MAP_PATTERN" "^/run/ortho/.*\\.map$"\n  END\nEND\n' > /etc/mapserver.conf
 
 WORKDIR /app
 EXPOSE 8080

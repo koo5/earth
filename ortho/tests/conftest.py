@@ -31,7 +31,11 @@ def server():
     work = pathlib.Path(tempfile.mkdtemp(prefix="cuzk-fix-"))
     src, data = work / "src", work / "data"
     src.mkdir()
-    data.mkdir()
+    # made by the container's root, as the server's /data is its (rootless: the deploying user): the container
+    # runs with no capabilities, so a root without CAP_DAC_OVERRIDE could not write into a directory the
+    # test's user owns under rootful docker
+    made = _sh(CLI, "run", "--rm", "-v", f"{work}:/w", "--entrypoint", "mkdir", IMAGE, "/w/data")
+    assert made.returncode == 0, made.stderr
     # the sheet source: the .jp2 and its sidecars zipped as openzu ships them (the .j2w is the geotransform)
     with zipfile.ZipFile(src / f"{FIXTURE_TILE.stem}.zip", "w") as z:
         for ext in (".jp2", ".j2w", ".gml"):
@@ -41,6 +45,9 @@ def server():
     _sh(CLI, "rm", "-f", CONTAINER)
     run = _sh(CLI, "run", "-d", "--name", CONTAINER,
               "-p", f"{PORT}:8080",
+              # as deploy/compose.yml runs it: no capabilities, no new privileges, a read-only root
+              "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
+              "--tmpfs", "/tmp", "--tmpfs", "/run",
               "-v", f"{src}:/src:ro",
               "-v", f"{data}:/data",
               "-e", "SHEETS_URL=file:///src",

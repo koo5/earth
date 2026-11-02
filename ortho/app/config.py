@@ -16,6 +16,9 @@ import yaml
 import sheets as S
 
 APP_DIR = "/app"
+# what the entrypoint generates at each start (the mapfile, mapproxy.yaml): a tmpfs, so the image can run with a
+# read-only root (deploy/compose.yml, recon pl03). /etc/mapserver.conf names it, baked in the Dockerfile.
+GEN_DIR = "/run/ortho"
 TEMPLATES = Path(__file__).parent / "templates"
 MAPSERV_BIN = "/usr/lib/cgi-bin/mapserv"
 # zooms 18-20 are drawn from the sheets each time and never stored: stored, they would outweigh the sheets
@@ -82,22 +85,13 @@ class Config:
     @property
     def tile_cache(self) -> str: return f"{self.cache_dir}/oi"
     @property
-    def mapfile(self) -> str: return f"{APP_DIR}/oi.map"
+    def mapfile(self) -> str: return f"{GEN_DIR}/oi.map"
     @property
-    def mapproxy_yaml(self) -> str: return f"{APP_DIR}/mapproxy.yaml"
+    def mapproxy_yaml(self) -> str: return f"{GEN_DIR}/mapproxy.yaml"
 
     def ensure_dirs(self) -> None:
-        for d in (APP_DIR, self.cache_dir, self.state_dir, self.lock_dir, self.tile_lock_dir):
+        for d in (GEN_DIR, self.cache_dir, self.state_dir, self.lock_dir, self.tile_lock_dir):
             Path(d).mkdir(parents=True, exist_ok=True)
-
-
-def write_mapserver_conf(cfg: Config) -> None:
-    # MapServer 8 refuses to load a mapfile by path unless it matches this gate.
-    Path("/etc/mapserver.conf").write_text(
-        "CONFIG\n  ENV\n"
-        f'    "MS_MAP_PATTERN" "^{APP_DIR}/.*\\.map$"\n'
-        "  END\nEND\n"
-    )
 
 
 def write_mapfile(cfg: Config, known) -> None:

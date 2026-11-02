@@ -19,9 +19,9 @@ import sheets as S
 from config import DIRECT_FROM_ZOOM, DIRECT_LAYER, Config
 from store import SheetMissing, Store, StoreFull
 
-_mapproxy = make_wsgi_app("/app/mapproxy.yaml")
-_VIEWER = "/app/leaflet.html"
 _cfg = Config.from_env()
+_mapproxy = make_wsgi_app(_cfg.mapproxy_yaml)
+_VIEWER = "/app/leaflet.html"
 _known = S.load()
 _detail = S.detail_zoom(_cfg.crossover)
 _store = Store.of(_cfg)

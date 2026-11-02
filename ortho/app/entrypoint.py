@@ -7,7 +7,7 @@ is on disk, and the overview is created (empty, once) and filled by the backgrou
 import sys
 
 import sheets as S
-from config import Config, write_mapfile, write_mapproxy, write_mapserver_conf
+from config import Config, write_mapfile, write_mapproxy
 from serve import run_server, start_maintainer
 from store import Store
 
@@ -23,7 +23,6 @@ def main() -> int:
           f"overview after {cfg.ov_min_sheets} sheets + {cfg.ov_quiet_s:.0f} s quiet, "
           f"or {cfg.ov_max_age_s:.0f} s", flush=True)
     cfg.ensure_dirs()
-    write_mapserver_conf(cfg)
     Store.of(cfg).reconcile(known)
     write_mapfile(cfg, known)
     write_mapproxy(cfg)
