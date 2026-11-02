@@ -16,7 +16,7 @@ import argparse
 import json
 import sys
 
-from . import citymodels, config, names, ortho, osm, store as store_mod, tiles
+from . import citymodels, config, names, ortho, osm, reference, store as store_mod, tiles
 
 GENERATOR = "earth-terrain/1 q16+f32 n65"
 
@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     reg.add_argument("--pmtiles", help="osm: the archive's file name in the store's osm/ directory (osm/build.sh)")
     reg.add_argument("--areas", help="models: the prepared areas' sha256s, comma-separated (earth models prepare)")
     reg.add_argument("--names", help="names: the file's name in the store's names/ directory (earth names build)")
+    reg.add_argument("--unchecked", metavar="WHY", help="terrain: register without the reference summits "
+                     "(reference.py), saying why; the release records it")
     rel.add_parser("list")
     ch = sub.add_parser("channel").add_subparsers(dest="cmd", required=True)
     cs = ch.add_parser("set")
@@ -70,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     s = store_mod.Store()
     try:
+        if a.what == "release" and a.cmd == "register" and a.unchecked is not None and a.layer != "terrain":
+            raise store_mod.StoreError("--unchecked is for a terrain release (its reference summits)")
         if a.what == "release" and a.cmd == "register" and a.layer == "ortho":
             # fetched from the ortho service on first ask (ortho.py): nothing here to freeze it on
             if not a.live or not a.year:
@@ -113,6 +117,16 @@ def main(argv: list[str] | None = None) -> int:
             if missing and not a.live:
                 print(f"warning: not on this machine: {', '.join(missing)} -- the release is registered "
                       f"on their absence, and the tiles that would read them fall back", file=sys.stderr)
+            # checked against surveyed summits before anything can serve it (reference.py)
+            if a.unchecked is not None:
+                if not a.unchecked.strip():
+                    raise store_mod.StoreError("--unchecked says why")
+                sources["reference"] = {"unchecked": a.unchecked}
+            else:
+                try:
+                    sources["reference"] = reference.check()
+                except reference.ReferenceError as e:
+                    raise store_mod.StoreError(f"not registered: {e}")
             r = s.register(a.id, a.layer, sources, GENERATOR, "live" if a.live else "frozen", a.note)
             print(json.dumps(r.__dict__, indent=1))
         elif a.what == "release":

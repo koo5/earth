@@ -62,9 +62,9 @@ earth ...` in `deploy/` (in a shell loop add `</dev/null`, or the first call eat
 the loop's input).
 
 ```sh
-# terrain: build, then register what is in place under the DEM directory
+# terrain: build, then register what is in place under the DEM directory (checked at surveyed summits first)
 podman compose --profile build run --rm builder              # all of Czechia; or [bbox] [dtm|dsm|both]
-earth release register terrain terrain-<date> --note "..."
+earth release register terrain terrain-<date> --note "..."   # a bbox with no summit: --unchecked "<why>"
 
 # orthophoto: one live release; the year is what its attribution shows (ČÚZK, <year>)
 earth release register ortho ortho-cuzk-sheets --live --year 2024-2025
@@ -94,6 +94,12 @@ earth channel set prod terrain=<id> ortho=<id> osm=<id> models=<id> names=<id>
 A frozen release refuses to make tiles once its mosaics change: new sheets mean a new release. A
 machine whose ground is still being built registers a `--live` terrain release instead. It follows
 the mosaics, keeps its tiles per mosaic stamp, and is never served as immutable.
+
+Before a terrain release is registered, each ČÚZK mosaic (bare and surface, 10 m and 2 m) is read at the
+summits in `earth/reference_heights.json` (open summits, their OSM `ele`, one per ~25 km), and the release is
+refused when one reads more than 5 m off, or when a mosaic has none on it (`earth/reference.py`). The first
+full build here came out 44 m high: GDAL 3.13 turned the warp's sea-level heights ellipsoidal. The release
+records what was checked, or `--unchecked` and why.
 
 ## Limits
 
