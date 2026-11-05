@@ -36,6 +36,10 @@ from .limits import Limits, client_ip
 
 IMMUTABLE = "public, max-age=31536000, immutable"
 LIVE = "public, max-age=300"
+# an orthophoto tile with imagery all over it (JPEG: the ortho service sends PNG wherever a tile has transparency):
+# it changes only when CUZK renews the sheets under it, a two-year cycle, so browsers keep it for 3 months. A PNG
+# keeps LIVE: a partial tile (the overview with sheets still missing, a sheet not fetched) fills in later.
+ORTHO_OPAQUE = "public, max-age=7776000"
 TILE_HEADERS = ["X-Tile-N", "X-Tile-Bounds", "X-Tile-Model", "X-Tile-Status", "X-Tile-Sources",
                 "X-Tile-Heights", "X-Tile-Format", "X-Tile-Complete", "X-Tile-Waiting", "X-Tile-Kept",
                 "X-Attribution",
@@ -235,7 +239,8 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
             body, mt, cost = got
             lim().charge_make(request, cost)
         return Response(body, media_type=mt,
-                        headers={"Cache-Control": LIVE, "X-Attribution": "cuzk-ortho"})
+                        headers={"Cache-Control": ORTHO_OPAQUE if mt == "image/jpeg" else LIVE,
+                                 "X-Attribution": "cuzk-ortho"})
 
     @app.get("/t/{rid}/osm/{z}/{x}/{y}.mvt")
     async def osm_tile(rid: str, z: int, x: int, y: int, request: Request):
