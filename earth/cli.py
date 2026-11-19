@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise store_mod.StoreError("an ortho release is --live (it fetches from the ortho service as "
                                            "asked) and names the imagery's --year for its attribution")
             try:
-                # extent: the box a client may ask in ([w, s, e, n] degrees), the one earth answers (EARTH 11-02)
+                # extent: the box a client may ask in ([w, s, e, n] degrees), the one earth answers
                 sources = {"upstream": ortho.upstream(), "year": a.year, "metadata": "CZ-CUZK-ORTOFOTO-R",
                            "extent": ortho.extent_degrees()}
             except ortho.OrthoError as e:

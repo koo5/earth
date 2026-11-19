@@ -24,7 +24,7 @@ built, a GLO-30 tile not fetched, at a zoom where that data would be used. Only 
 kept (store.py); an incomplete one is answered and made again next time. A coarse tile drawn from
 the global model is final, so it is complete: an ocean tile used to stay incomplete for ever and a
 client never settled. So is a hole the fill cannot reach (a pond wider than its reach): the same
-mosaics give the same hole, and its tile was remade on every ask until 2026-11-02 (ea08).
+mosaics give the same hole, and its tile was remade on every ask until 2026-11-02.
 
 Wire formats: see `encode_f32` and `encode_q16`.
 
@@ -177,7 +177,7 @@ class Tile:
     counts: dict = field(default_factory=dict)
     # why the tile is not complete: "cuzk" (a sheet in the index not built), "glo30" (a tile not
     # fetched). A hole the fill cannot reach (water wider than its reach) is no wait: the same mosaics
-    # give the same hole, so the tile is final, kept, and counts it in `counts` (ea08, 2026-11-02:
+    # give the same hole, so the tile is final, kept, and counts it in `counts` (until 2026-11-02
     # the Třeboň ponds' z9 tile was remade on every ask, and a client asked again every 30 s)
     waiting: list = field(default_factory=list)
 

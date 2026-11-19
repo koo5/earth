@@ -10,10 +10,10 @@ fetching stops and a tile that needs a sheet not held is refused; more storage i
 - sheets.sqlite records each sheet's size, arrival and whether the overview has it yet; how long recent
   downloads took (the Retry-After a waiting tile is given), and the sheets whose download failed lately.
 - A tile never waits for its sheets on the request (begin): their downloads start in the background and the
-  tile is answered "come back in N s" at once (recon pl04: a request that held a worker for minutes held
+  tile is answered "come back in N s" at once (a request that held a worker for minutes held
   every cached tile behind it, and gunicorn killed it at 120 s).
 - At most FETCH_JOBS downloads run at once across all workers (a slot is a lock file), so on a slow ČÚZK the
-  first sheets land early instead of all of them late together (pl04: 16 at once, all 111-152 s). The queue
+  first sheets land early instead of all of them late together (16 at once: all 111-152 s). The queue
   table holds every download queued or running, in any worker: Retry-After and the prefetcher read it.
 """
 from __future__ import annotations
@@ -50,7 +50,7 @@ class StoreFull(RuntimeError):
 FAIL_HOLD_S = 300
 # Retry-After for a waiting tile: the median of recent transfers, times the server's queue over its slots. Kept
 # short: too short costs one more 503 that starts nothing, too long keeps a viewer waiting for a sheet already
-# here (112 s asked, the sheet in after 40 s: 11-02, when transfers timed from their queueing)
+# here (112 s asked, the sheet in after 40 s, when transfers were timed from their queueing)
 RETRY_MIN_S, RETRY_MAX_S, RETRY_FIRST_S = 5, 60, 20
 # a queue row older than this is a worker that died mid-download (rows are also cleared at start)
 QUEUE_STALE_S = 1800

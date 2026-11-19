@@ -2,10 +2,10 @@
 # the JPEG2000 sheets held on disk through a tile index, and a 4 m overview (README.md).
 # Debian trixie (stable, security-patched GDAL 3.10 with JP2OpenJPEG, OpenJPEG 2.5.3) with MapServer from
 # trixie-backports: 8.6.6 is the first without the WMS interpolation heap write (GHSA-59gr-4vvx-5f56), and
-# trixie's own 8.4.0 has four CVEs open, "no DSA, postponed" (recon pl02). Ubuntu 24.04's 8.0.1 until 11-02.
+# trixie's own 8.4.0 has four CVEs open, "no DSA, postponed". Ubuntu 24.04's 8.0.1 until 2026-11-02.
 # Cooloff: the backport was built 2026-09-10 and is pinned below, so a rebuild takes the same one until someone
 # moves it. The base digest is a Debian stable point image pushed 2026-10-27, younger than the 14 days on
-# purpose: a security refresh wants the latest point release (EARTH's review, 11-02).
+# purpose: a security refresh wants the latest point release.
 FROM docker.io/library/debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
 
 ENV DEBIAN_FRONTEND=noninteractive

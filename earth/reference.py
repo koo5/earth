@@ -1,4 +1,4 @@
-"""Surveyed heights a terrain release must agree with before it is registered (the operator, 2026-11-02).
+"""Surveyed heights a terrain release must agree with before it is registered.
 
 earth.hillview.cz's first full build came out ellipsoidal, every height ~44 m high (GDAL 3.13 with PROJ's
 network on turned the warp's Bpv into WGS 84; the builder warps with -novshift since), and it was registered

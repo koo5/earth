@@ -1,4 +1,4 @@
-"""Names: OSM's named peaks, towers and places, each at an ellipsoidal height, for a viewer's labels (recon ea07).
+"""Names: OSM's named peaks, towers and places, each at an ellipsoidal height, for a viewer's labels.
 
 A names release is one JSON file built ahead (`earth names build`): osm/names.sh pulls the named points out of the
 same Geofabrik extract the map is made from (osmium-tool), and this module turns them into what a viewer labels
@@ -110,9 +110,9 @@ def in_query(tags: dict) -> bool:
 
 
 def water_tower(tags: dict) -> bool:
-    """Beyond the workbench's query (the operator, 2026-11-02: "water towers sound useful too"): a named water
-    tower, as OSM tags it (man_made=water_tower; the rarer man_made=tower + tower:type=water). Its own kind,
-    `water_tower`: a local landmark, which the viewer reaches and hides as it does a street's name, not a peak's."""
+    """Beyond the workbench's query: a named water tower, as OSM tags it (man_made=water_tower; the rarer
+    man_made=tower + tower:type=water). Its own kind, `water_tower`: a local landmark, which the viewer reaches
+    and hides as it does a street's name, not a peak's."""
     return bool(tags.get("name")) and (tags.get("man_made") == "water_tower"
                                        or (tags.get("man_made") == "tower" and tags.get("tower:type") == "water"))
 
@@ -146,8 +146,9 @@ Geoid = Callable[[np.ndarray, np.ndarray], np.ndarray]
 
 def surface_heights(lons: np.ndarray, lats: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """The surface model's orthometric heights at the points, and which it had. Refuses when any lies under a ČÚZK
-    sheet not built on this machine: a release made there would leave out every name it could not place (on dev44,
-    2026-11-02, 14,256 of 25,174), and nothing in it would say so. Build names where the surface is complete."""
+    sheet not built on this machine: a release made there would leave out every name it could not place (on a
+    machine with part of the country built, 14,256 of 25,174), and nothing in it would say so. Build names where
+    the surface is complete."""
     from . import ground
     g = ground.sample_ground(lons, lats, ground.TERRAIN_SURFACE)
     c = g.counts()
@@ -184,7 +185,7 @@ def build(geojsonseq: str, out: str, surface: Surface | None = None, geoid: Geoi
           ground: dict | None = None) -> dict:
     """names.sh's export -> the release file (`out`, under names_dir() for a release); what was built. The file
     records the ground its estimated heights stand on (`ground`: the surface mosaics' stamp, as a terrain release
-    records it), so a release says which ground it baked in (PLANET's review: a +44 m build would have gone in
+    records it), so a release says which ground it baked in (a +44 m build would otherwise have gone in
     unseen). A caller that brings its own `surface` names its ground."""
     if surface is None:
         from . import ground as ground_mod, tiles
@@ -230,7 +231,7 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 class Names:
     """One release's names, read once, their positions kept as arrays so a disc is one pass (a few ms over a
-    country; a Python loop took 28-59 ms and holds the server's one process: PLANET's review)."""
+    country; a Python loop took 28-59 ms and holds the server's one process)."""
 
     def __init__(self, path: str):
         with open(path, encoding="utf-8") as fh:

@@ -11,7 +11,7 @@
 #
 # The DEM mosaics are read-only to earth; the store (releases, channels, kept tiles) is its own.
 #
-# Hardening (recon pl03): each serving container drops every capability, cannot gain privileges, and has a
+# Hardening: each serving container drops every capability, cannot gain privileges, and has a
 # read-only root with tmpfs where it writes scratch; what a code-execution bug in one could touch is its own
 # volumes. Rootless already maps their root to the deploying user.
 x-hardened: &hardened

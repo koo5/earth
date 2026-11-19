@@ -1,4 +1,4 @@
-"""Download the busy places' sheets ahead, while nobody waits (the operator, 2026-11-02; recon pl04).
+"""Download the busy places' sheets ahead, while nobody waits.
 
 A first view of an area waits for its sheets, and ČÚZK gives a 77 MB sheet in 9 to 50 s, so the towns most views
 will ask for are fetched when the service is idle: places.json (make_places.py: OpenStreetMap's cities and towns

@@ -11,7 +11,7 @@ is placed by its true position: lat, lon and ELLIPSOIDAL height through ECEF. A 
 body, small next to the earth, so carrying it is one rotation and one translation -- from the
 tangent frame at its own centre to the world's -- and nothing inside it is deformed.
 
-HEIGHTS. The bench's heights are orthometric (vertical_datum.py), the geometry needs ellipsoidal
+HEIGHTS. The workbench's heights are orthometric (vertical_datum.py), the geometry needs ellipsoidal
 ones: h = H + N, the geoid height N from EGM2008. A run's frame sits at (its centre, h = N_c) so
 its up = 0 is the geoid there; the world's at (origin, h = N_0), so world up near the origin is an
 orthometric height -- the numbers stay the ones the DEM and the readouts speak.

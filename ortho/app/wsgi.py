@@ -64,7 +64,7 @@ def application(environ, start_response):
             except SheetMissing as e:
                 return _reply(start_response, "502 Bad Gateway", f"sheet not fetched: {e}".encode())
             if waiting is not None:
-                # its sheets are downloading: come back then, nobody holds a worker for it (recon pl04). The
+                # its sheets are downloading: come back then, nobody holds a worker for it. The
                 # cost is the downloads this ask started.
                 started, after = waiting
                 return _reply(start_response, "503 Service Unavailable",

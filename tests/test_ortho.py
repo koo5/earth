@@ -142,7 +142,7 @@ def test_a_second_dear_tile_in_flight_is_refused_once_the_first_is_charged(limit
 
 def test_one_address_waiting_on_new_sheets_does_not_hold_another_address_cached_tile(limited):
     """A viewer's new area (tiles waiting minutes for their sheets) held every other viewer's cached tiles
-    behind one shared cap of 4: 170 s on earth.hillview.cz, 2026-11-02 (recon pl03)."""
+    behind one shared cap of 4: 170 s on earth.hillview.cz."""
     gate = threading.Event()
     up = Upstream({}, gate)
     c = limited(up)

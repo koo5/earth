@@ -56,7 +56,7 @@ def test_holes_far_apart_are_filled_in_blocks_and_each_as_alone(world, monkeypat
 
 
 def _boundless_fill(vrt, lons, lats, reach_m):
-    """The fill as it read until 2026-11-02 (ea08): rasterio's boundless window, the reference for the clipped one."""
+    """The fill as it read until 2026-11-02: rasterio's boundless window, the reference for the clipped one."""
     import math
     import rasterio.transform
     from rasterio.fill import fillnodata
@@ -86,7 +86,7 @@ def _boundless_fill(vrt, lons, lats, reach_m):
 
 def test_the_fill_reads_the_mosaic_once_and_answers_as_the_boundless_read_did(world, monkeypatch):
     """A cold z9 bare tile on the built country took 84 s, 34 of them reopening dtm10.vrt per 5 km block and most
-    of the rest rasterio's boundless reads (ea08). Every window here runs off the raster's edge."""
+    of the rest rasterio's boundless reads. Every window here runs off the raster's edge."""
     make_tif(str(world / "warp/dtm10/AAAA00.tif"), A, plane, hole=(slice(1, 6), slice(30, 38)))
     vrt = str(world / "dtm10.vrt")
     pts = [P_HOLE, (A[0] + 0.0335, A[3] - 0.0025), (A[0] + 0.0005, A[1] + 0.0005), P_OK]

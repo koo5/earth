@@ -12,7 +12,7 @@
    Asks of the ortho service in flight are capped per address (EARTH_LIMIT_ORTHO_PER_ADDRESS) under a
    cap across everyone (EARTH_LIMIT_ORTHO_CONCURRENT, what the ortho service serves at once): a tile
    whose sheets are still downloading takes a minute or two, and with one shared cap of 4 a single
-   viewer's new area held every other viewer's cached tiles for 170 s (recon pl03, 2026-11-02).
+   viewer's new area held every other viewer's cached tiles for 170 s.
 
 Past a limit: 429 with Retry-After, and a client keeps the coarser tile it already has.
 

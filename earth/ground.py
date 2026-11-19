@@ -279,7 +279,7 @@ def filled_heights(path: str, lons, lats, reach_m: float | None = None):
     import rasterio
 
     # opened once: the country's dtm10.vrt lists 16,301 sheets, and opening it costs ~0.5 s -- once per block,
-    # it was 34 of a cold z9 tile's 84 s on earth.hillview.cz (2026-11-02, ea08)
+    # it was 34 of a cold z9 tile's 84 s on earth.hillview.cz
     with rasterio.open(path) as ds:
         for idx in blocks.values():
             out[idx] = _filled_window(ds, lons[idx], lats[idx], reach_m)

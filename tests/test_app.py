@@ -60,7 +60,7 @@ def test_an_incomplete_tile_is_answered_but_not_kept(svc):
 
 def test_a_tile_with_a_hole_the_fill_cannot_reach_is_complete_and_kept(world, monkeypatch):
     """A lake wider than the fill's reach is the same hole on every make of the same mosaics: the tile is
-    final. It was "waiting: nodata", remade on every ask (9/277/175, the Třeboň ponds: ~10 s each, ea08)."""
+    final. It was "waiting: nodata", remade on every ask (9/277/175, the Třeboň ponds: ~10 s each)."""
     from conftest import A, make_tif
     make_tif(str(world / "warp/dtm10/AAAA00.tif"), A, plane, hole=(slice(4, 10), slice(10, 16)))
     monkeypatch.setattr(tiles.ground, "FILL_REACH_M", 100.0)
@@ -121,7 +121,7 @@ def test_attribution_and_cors(svc):
     r = c.get(url(*BUILT), headers={"Origin": "https://hillview.cz"})
     assert r.headers["access-control-allow-origin"] == "*"
     assert "X-Tile-Sources" in r.headers["access-control-expose-headers"]
-    assert "Retry-After" in r.headers["access-control-expose-headers"]   # the 429s' and ortho's 503s' (pl04)
+    assert "Retry-After" in r.headers["access-control-expose-headers"]   # the 429s' and ortho's 503s'
 
 
 def test_ground_answers_points_and_boxes_with_a_status_each(svc):
@@ -149,7 +149,7 @@ def test_a_frozen_release_answers_ground_only_from_its_own_mosaics(svc, world):
 
 
 def test_a_ground_answer_names_the_mosaics_its_heights_were_read_from(svc, world, monkeypatch):
-    """RESEARCH3's ea10: every height a run is given names its terrain. A frozen release answers its registered
+    """Every height earth answers names its terrain. A frozen release answers its registered
     stamp; a live one what is on disk then; a rebuild during the query is a 503, never a stamp it was not read from."""
     import os
     c, s = svc

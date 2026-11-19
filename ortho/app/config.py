@@ -17,7 +17,7 @@ import sheets as S
 
 APP_DIR = "/app"
 # what the entrypoint generates at each start (the mapfile, mapproxy.yaml): a tmpfs, so the image can run with a
-# read-only root (deploy/compose.yml, recon pl03). /etc/mapserver.conf names it, baked in the Dockerfile.
+# read-only root (deploy/compose.yml). /etc/mapserver.conf names it, baked in the Dockerfile.
 GEN_DIR = "/run/ortho"
 TEMPLATES = Path(__file__).parent / "templates"
 MAPSERV_BIN = "/usr/lib/cgi-bin/mapserv"
@@ -64,7 +64,7 @@ class Config:
             port=int(os.environ.get("PORT", "8080")),
             workers=int(os.environ.get("WORKERS", "4")),
             # per worker: a tile waiting for its sheet holds a thread, not the worker, so cached tiles keep
-            # flowing while a new area downloads (4 sync workers held them for minutes: recon pl03, 11-02)
+            # flowing while a new area downloads (4 sync workers held them for minutes)
             threads=int(os.environ.get("THREADS", "8")),
             srs=os.environ.get("SRS", "EPSG:25833"),
             ov_res=int(os.environ.get("OV_RES", "4")),
@@ -72,7 +72,7 @@ class Config:
             # ČÚZK's open-data sheets, <id>.zip; a file:// directory works too (the tests)
             sheets_url=os.environ.get("SHEETS_URL", "https://openzu.cuzk.gov.cz/opendata/OI"),
             # downloads at once across all workers: ČÚZK gives ~1-8.5 MB/s a sheet, so more at once only makes
-            # every sheet late together (recon pl04)
+            # every sheet late together
             fetch_jobs=int(os.environ.get("FETCH_JOBS", "4")),
             # ~450 GB is ~6,000 sheets, ~30% of Czechia (a 1 TB server's share); past it nothing is fetched
             budget_bytes=int(float(os.environ.get("SHEET_BUDGET_GB", "450")) * 1e9),
