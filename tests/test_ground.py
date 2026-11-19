@@ -6,7 +6,7 @@ import pytest
 import rasterio
 
 from earth import ground as gd
-from conftest import A, HOLE, CELL, make_tif, plane
+from conftest import A, B, HOLE, CELL, make_dtm2, make_tif, plane
 
 P_OK = (14.0123, 50.0071)
 P_NOT_FETCHED = (14.06, 50.01)               # in B, which is not built
@@ -145,6 +145,65 @@ def test_missing_index_and_broken_mosaic_are_loud(world):
 def test_want_is_checked(world):
     with pytest.raises(ValueError):
         _ask([P_OK], "dsm")
+
+
+ROOF = (14.020, 50.008, 14.024, 50.012)       # no 2 m ground inside: a building
+P_ROOF = (14.022, 50.010)
+
+
+def test_bare_finest_is_dtm2_then_its_fill_then_what_bare_answers(world):
+    """The 2 m mosaic is the plane + 1 m here, so every height says which mosaic it came from."""
+    make_dtm2(world, [("AAAA00", A)], roof=ROOF)
+    pts = [P_OK, P_ROOF, P_HOLE, P_NOT_FETCHED, P_OUTSIDE]
+    g = _ask(pts, "bare_finest")
+    assert g.want == "bare_finest" and g.fetch_layer == "dtm"
+    assert g.status == ["ok", "ok", "ok", "not_fetched", "outside"]
+    # DTM10's hole (P_HOLE) is 2 m ground; the roof is filled from the 2 m ground round it
+    assert g.src[:3] == ["dtm2.vrt", "dtm2.fill", "dtm2.vrt"] and g.src[3:] == [None, None]
+    assert g.height[0] == pytest.approx(plane(*P_OK) + 1.0, abs=1e-3)
+    assert g.height[1] == pytest.approx(plane(*P_ROOF) + 1.0, abs=1.0)
+    assert g.height[2] == pytest.approx(plane(*P_HOLE) + 1.0, abs=1e-3)
+    assert g.fetchable == [False, False, False, True, False]
+    assert g.models() == {"dtm2"}
+    # "bare" is DTM10 still
+    b = _ask(pts, "bare")
+    assert b.src[:3] == ["dtm10.vrt", "dtm10.vrt", "dtm10.fill"]
+    assert b.height[0] == pytest.approx(plane(*P_OK), abs=1e-3)
+
+
+def test_bare_finest_without_a_2m_mosaic_is_bare(world):
+    pts = [P_OK, P_HOLE, P_NOT_FETCHED, P_OUTSIDE]
+    f, b = _ask(pts, "bare_finest"), _ask(pts, "bare")
+    assert (f.status, f.src, f.fetchable) == (b.status, b.src, b.fetchable)
+    assert np.array_equal(f.height, b.height, equal_nan=True)
+
+
+def test_where_the_2m_sheet_is_not_built_bare_finest_is_dtm10_never_a_fill_from_its_neighbours(world):
+    """A sheet the 10 m mosaic holds and the 2 m one does not: its points are DTM10's. The 2 m ground of the
+    neighbouring sheet lies within the fill's reach (filled_heights would answer), but that is not a hole in
+    built 2 m ground. And a point the 2 m mosaic covers is its, even where DTM10 waits for a sheet."""
+    make_dtm2(world, [("BBBB00", B)])                    # 2 m: B only; 10 m: A only
+    near_b = (A[2] - 0.003, 50.01)                      # in A, ~210 m from B's 2 m ground
+    assert np.isfinite(gd.filled_heights(str(world / "dtm2.vrt"), [near_b[0]], [near_b[1]])).all()
+    g = _ask([near_b, P_NOT_FETCHED], "bare_finest")
+    assert g.status == ["ok", "ok"] and g.src == ["dtm10.vrt", "dtm2.vrt"]
+    assert g.height[0] == pytest.approx(plane(*near_b), abs=1e-3)
+    assert g.height[1] == pytest.approx(plane(*P_NOT_FETCHED) + 1.0, abs=1e-3)
+    assert g.fetchable == [False, False]
+
+
+def test_single_source_refuses_a_bare_finest_batch_spanning_dtm2_and_dtm10(world):
+    make_dtm2(world, [("BBBB00", B)])
+    m = _ask([P_OK, P_NOT_FETCHED], "bare_finest", single_source=True)
+    assert m.status == ["mixed", "mixed"] and np.isnan(m.height).all()
+    assert m.src == ["dtm10.vrt", "dtm2.vrt"] and m.models() == {"dtm10", "dtm2"}
+
+
+def test_single_source_takes_a_mosaic_and_its_fill_for_one_model(world):
+    make_dtm2(world, [("AAAA00", A)], roof=ROOF)
+    one = _ask([P_OK, P_ROOF], "bare_finest", single_source=True)
+    assert one.status == ["ok", "ok"] and one.src == ["dtm2.vrt", "dtm2.fill"]
+    assert _ask([P_OK, P_HOLE], "bare", single_source=True).status == ["ok", "ok"]
 
 
 def test_bilinear_is_nan_outside_the_raster_even_in_a_mixed_batch(world):

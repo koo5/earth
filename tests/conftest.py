@@ -62,6 +62,25 @@ def make_vrt(path, tifs, bbox):
                 f'{src}</VRTRasterBand></VRTDataset>')
 
 
+def make_dtm2(world, sheets, roof=None):
+    """The 2 m bare mosaic over `sheets` [(code, bbox)]: the plane + 1 m, so its heights are told from DTM10's,
+    and no ground inside `roof` (w, s, e, n). The world's cells serve for 2 m ones: what is told apart here is
+    which mosaic answered, not its resolution."""
+    def fn(lo, la):
+        h = plane(lo, la) + 1.0 + 0 * lo * la
+        if roof is not None:
+            w, s, e, n = roof
+            h = np.where((lo > w) & (lo < e) & (la > s) & (la < n), -9999.0, h)
+        return h
+    tifs = []
+    for code, bb in sheets:
+        make_tif(str(world / f"warp/dtm2/{code}.tif"), bb, fn)
+        tifs.append((f"warp/dtm2/{code}.tif", bb))
+    box = [min(b[0] for _, b in sheets), min(b[1] for _, b in sheets),
+           max(b[2] for _, b in sheets), max(b[3] for _, b in sheets)]
+    make_vrt(str(world / "dtm2.vrt"), tifs, box)
+
+
 def tile_of(lat, lon, z):
     k = 2 ** z
     return z, int((lon + 180) / 360 * k), int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * k)

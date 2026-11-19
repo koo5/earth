@@ -172,3 +172,34 @@ def test_a_ground_answer_names_the_mosaics_its_heights_were_read_from(svc, world
     monkeypatch.setattr(app_mod.ground_mod, "sample_ground", rebuilt_meanwhile)
     r = c.post("/t/terrain-live/terrain/ground", json=q)
     assert r.status_code == 503 and r.headers["retry-after"] == "1"
+
+
+def test_bare_finest_answers_dtm2_under_the_bare_stamp_which_covers_both_mosaics(world, monkeypatch):
+    """The finest bare per point, stamped over the 10 m and the 2 m mosaic, so a rebuild of either is a new
+    terrain; "bare" stays DTM10."""
+    from conftest import A, make_dtm2
+    make_dtm2(world, [("AAAA00", A)])
+    monkeypatch.setenv("EARTH_NO_LIMITS", "1")
+    s = store.Store()
+    s.register("terrain-a", "terrain", {m: tiles.source_stamp(m) for m in tiles.MODELS}, "test")
+    c = TestClient(app_mod.create_app(store=s, limits=limits.Limits()))
+    g = "/t/terrain-a/terrain/ground"
+    pts = [[14.0105, 50.0105], [14.06, 50.01]]
+    r = c.post(g, json={"points": pts, "want": "bare_finest"})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["want"] == "bare_finest" and j["vertical"] == "orthometric"
+    assert j["status"] == ["ok", "not_fetched"] and j["src"] == ["dtm2.vrt", None]
+    assert abs(j["heights"][0] - (plane(*pts[0]) + 1.0)) < 0.01 and j["sources"] == {"dtm2.vrt": 1}
+    assert j["stamp"] == store.stamp_key(s.release("terrain-a").sources["bare"])
+    b = c.post(g, json={"points": pts, "want": "bare"}).json()
+    assert b["src"][0] == "dtm10.vrt" and abs(b["heights"][0] - plane(*pts[0])) < 0.01
+    assert b["stamp"] == j["stamp"]
+    mixed = c.post(g, json={"points": [pts[0], [14.0123, 50.0071]], "want": "bare_finest", "single_source": True})
+    assert mixed.json()["status"] == ["ok", "ok"]                     # one model: DTM2 at both
+    assert c.post(g, json={"points": pts, "want": "dtm2"}).status_code == 422
+    st_ = os.stat(world / "dtm2.vrt")
+    os.utime(world / "dtm2.vrt", (st_.st_atime, st_.st_mtime + 100))  # the 2 m mosaic rebuilt
+    for want in ("bare_finest", "bare"):
+        r = c.post(g, json={"points": pts, "want": want})
+        assert r.status_code == 409 and "newer release" in r.text

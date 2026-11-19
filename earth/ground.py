@@ -25,6 +25,12 @@ from . import config
 #   want="bare"     ČÚZK DTM10 (DMR 5G, bare earth) and nothing else. Never GLO-30.
 #   want="surface"  ČÚZK DSM10 (DMP 1G) where it is built, else GLO-30; `src` names which, and
 #                   `single_source=True` refuses a batch that would span both ("mixed").
+#   want="bare_finest"  the finest bare model at each point: ČÚZK DTM2 where it has ground, "dtm2.vrt"; a hole
+#                   in built 2 m ground, from the 2 m ground round it as the fine tiles fill theirs, "dtm2.fill";
+#                   else exactly what want="bare" answers there. DTM10's 10 m cells carry a hillside's slope
+#                   across a level street; DTM2's do not. `single_source=True` refuses a batch spanning DTM2
+#                   and DTM10.
+#   A mosaic and its fill are one model, for single_source as for the callers that link fixes of one model.
 #
 #   status  ok           a height, from the model named in `src`; bare ground under a roof or on
 #                        water, where lidar saw no ground, is filled from the bare ground round it
@@ -40,6 +46,11 @@ from . import config
 # missing, and terrain_fetch.request_fetch hands that to the worker.
 TERRAIN_BARE = "bare"
 TERRAIN_SURFACE = "surface"
+TERRAIN_BARE_FINEST = "bare_finest"
+WANTS = (TERRAIN_BARE, TERRAIN_SURFACE, TERRAIN_BARE_FINEST)
+# the terrain release model whose source stamp (tiles.source_stamp) names every mosaic a want reads: "bare"'s
+# covers both bare mosaics, the 10 m and the 2 m, so a rebuild of either is a new terrain for both bare wants
+RELEASE_MODEL = {TERRAIN_BARE: "bare", TERRAIN_BARE_FINEST: "bare", TERRAIN_SURFACE: "surface"}
 GROUND_STATUSES = ("ok", "not_fetched", "outside", "nodata", "mixed")
 
 # A point whose bilinear neighbourhood reaches into an unbuilt neighbour sheet is NaN even when
@@ -335,7 +346,7 @@ class Ground:
         # points a ČÚZK fetch (of `fetch_layer`) would change: every not_fetched point that
         # lies in a sheet which is not built yet
         self.fetchable: list[bool] = [False] * n
-        self.fetch_layer = "dtm" if want == TERRAIN_BARE else "dsm"
+        self.fetch_layer = "dsm" if want == TERRAIN_SURFACE else "dtm"
         # surface points whose GLO-30 tile is not on the volume: a different fetch (the
         # terrain worker's glo30 layer), asked for by whoever needs the far ground
         self.glo30_missing: list[bool] = [False] * n
@@ -365,6 +376,10 @@ class Ground:
                                        f"a status was set without its source")
                 out[s] = out.get(s, 0) + 1
         return out
+
+    def models(self) -> set[str]:
+        """The models behind sources(): a mosaic and its fill are one ("dtm2.vrt", "dtm2.fill" -> "dtm2")."""
+        return {os.path.splitext(s)[0] for s in self.sources()}
 
     def summary(self) -> dict:
         """The JSON-ready tally every caller reports beside its number."""
@@ -406,10 +421,13 @@ def sample_ground(lons, lats, want: str, *, single_source: bool = False) -> Grou
                     where a hole in it is filled from the ground round it (filled_heights).
     want="surface"  ČÚZK DSM10 where built, else GLO-30; `src` says which, per point. Ground
                     under a ČÚZK sheet that is not fetched yet is not_fetched, never GLO-30.
-    single_source   (surface) refuse a batch that would span both: every point that had a height
-                    becomes status "mixed" with NaN, `src` still naming the model that answered
-                    it, so the caller can see the split. A bare batch has one source by
-                    construction.
+    want="bare_finest"  ČÚZK DTM2 ("dtm2.vrt"); a hole in built 2 m ground from the 2 m ground round
+                    it ("dtm2.fill"); else what want="bare" answers at the point (_finer_bare).
+    single_source   refuse a batch that would span two models (Ground.models: a mosaic and its fill
+                    are one): every point that had a height becomes status "mixed" with NaN, `src`
+                    still naming the model that answered it, so the caller can see the split.
+                    Surface can span DSM10 and GLO-30, bare_finest DTM2 and DTM10; a bare batch has
+                    one model by construction.
 
     Raises GroundConfigError when the sheet index it needs is missing: without it an absent
     height cannot be told apart as "outside" or "not fetched yet", and guessing is how this
@@ -417,8 +435,8 @@ def sample_ground(lons, lats, want: str, *, single_source: bool = False) -> Grou
     """
     import numpy as _np
 
-    if want not in (TERRAIN_BARE, TERRAIN_SURFACE):
-        raise ValueError(f"want must be {TERRAIN_BARE!r} or {TERRAIN_SURFACE!r}, not {want!r}")
+    if want not in WANTS:
+        raise ValueError(f"want must be one of {WANTS}, not {want!r}")
     P = config.dem_paths()
     lons = _np.atleast_1d(_np.asarray(lons, float))
     lats = _np.atleast_1d(_np.asarray(lats, float))
@@ -428,8 +446,9 @@ def sample_ground(lons, lats, want: str, *, single_source: bool = False) -> Grou
     if not len(lons):
         return g
 
-    cuzk_vrt = P["bare_vrt"] if want == TERRAIN_BARE else P["dsm_vrt"]
-    index = load_sheet_index(P["bare_index"] if want == TERRAIN_BARE else P["dsm_index"])
+    surface = want == TERRAIN_SURFACE
+    cuzk_vrt = P["dsm_vrt"] if surface else P["bare_vrt"]
+    index = load_sheet_index(P["dsm_index"] if surface else P["bare_index"])
     built = vrt_members(cuzk_vrt)
     name = os.path.basename(cuzk_vrt)
     h = _sample_model(cuzk_vrt, lons, lats)
@@ -437,13 +456,9 @@ def sample_ground(lons, lats, want: str, *, single_source: bool = False) -> Grou
         g.height[i], g.src[i], g.status[i] = h[i], name, "ok"
 
     def _cuzk_missing(lon, lat) -> tuple[bool, bool]:
-        """(inside a sheet footprint, a sheet at or next to the point is not built)"""
-        inside = bool(index.touching(lon, lat, lon, lat))
-        near = index.touching(lon - _NEIGHBOURHOOD_DEG, lat - _NEIGHBOURHOOD_DEG,
-                              lon + _NEIGHBOURHOOD_DEG, lat + _NEIGHBOURHOOD_DEG)
-        return inside, any(index.codes[k] not in built for k in near)
+        return _sheet_missing(index, built, lon, lat)
 
-    if want == TERRAIN_BARE:
+    if not surface:
         for i in range(len(lons)):
             if g.status[i] == "ok":
                 continue
@@ -461,7 +476,9 @@ def sample_ground(lons, lats, want: str, *, single_source: bool = False) -> Grou
             for k, i in enumerate(hole):
                 if _np.isfinite(hf[k]):
                     g.height[i], g.src[i], g.status[i] = hf[k], fname, "ok"
-        return g
+        if want == TERRAIN_BARE_FINEST:
+            _finer_bare(g, P, lons, lats)
+        return _one_model(g, single_source)
 
     # surface: GLO-30 answers where ČÚZK DSM10 did not -- but never for ground whose DSM10 sheet
     # is simply not fetched yet. It did until 2026-10-19: a town whose four sheets nobody had
@@ -496,8 +513,52 @@ def sample_ground(lons, lats, want: str, *, single_source: bool = False) -> Grou
             # (that is the ČÚZK fetch), but `glo30_missing` -- the worker's glo30 layer gets it
             g.status[i] = "not_fetched"
             g.glo30_missing[i] = True
-    if single_source and len(g.sources()) > 1:
-        for i in range(len(lons)):
-            if g.status[i] == "ok":
-                g.status[i], g.height[i] = "mixed", _np.nan
+    return _one_model(g, single_source)
+
+
+def _sheet_missing(index: SheetIndex, built: frozenset, lon: float, lat: float) -> tuple[bool, bool]:
+    """(inside a sheet footprint, a sheet at or next to the point is not in the mosaic `built` lists)"""
+    inside = bool(index.touching(lon, lat, lon, lat))
+    near = index.touching(lon - _NEIGHBOURHOOD_DEG, lat - _NEIGHBOURHOOD_DEG,
+                          lon + _NEIGHBOURHOOD_DEG, lat + _NEIGHBOURHOOD_DEG)
+    return inside, any(index.codes[k] not in built for k in near)
+
+
+def _finer_bare(g: Ground, P: dict, lons, lats) -> None:
+    """want="bare_finest", over what want="bare" answered: the 2 m mosaic where it has ground; a 2 m hole (no
+    value at the point, every sheet at and next to it in the 2 m mosaic) from the 2 m ground round it, as the fine
+    tiles fill theirs; anywhere else bare's answer stands -- a 2 m sheet not built there, or a hole the 2 m fill
+    cannot reach. Built is the 2 m mosaic's own members, so a sheet only the 10 m mosaic holds is answered from
+    DTM10, never "filled" from its neighbours' 2 m ground. (The fine tiles take bare's status for that instead:
+    the same answer while both mosaics hold the same sheets, as the builder makes them from one 2 m raster per
+    sheet.)"""
+    import numpy as _np
+
+    vrt = P["bare2_vrt"]
+    index = load_sheet_index(P["bare_index"])     # DTM2 is DMR 5G too: the same sheets
+    built = vrt_members(vrt)
+    name = os.path.basename(vrt)
+    h = _sample_model(vrt, lons, lats)
+    hole = []
+    for i in range(len(lons)):
+        if _np.isfinite(h[i]):
+            g.height[i], g.src[i], g.status[i], g.fetchable[i] = h[i], name, "ok", False
+        else:
+            inside, missing = _sheet_missing(index, built, lons[i], lats[i])
+            if inside and not missing:
+                hole.append(i)
+    if hole:
+        hf = filled_heights(vrt, lons[hole], lats[hole])
+        fname = os.path.splitext(name)[0] + ".fill"
+        for k, i in enumerate(hole):
+            if _np.isfinite(hf[k]):
+                g.height[i], g.src[i], g.status[i], g.fetchable[i] = hf[k], fname, "ok", False
+
+
+def _one_model(g: Ground, single_source: bool) -> Ground:
+    """single_source: a batch spanning two models is refused, every point that had a height "mixed"."""
+    if single_source and len(g.models()) > 1:
+        for i, st in enumerate(g.status):
+            if st == "ok":
+                g.status[i], g.height[i] = "mixed", math.nan
     return g

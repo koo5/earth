@@ -162,10 +162,11 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
 
         -> {release, want, stamp, vertical, heights, src, status, counts, sources, points (box only)}
         `heights[i]` is null unless `status[i]` is "ok". `stamp` names the mosaics the heights were read from
-        (store.stamp_key of tiles.source_stamp(want)): for a frozen release its registered one, for a live one
-        what was on disk then, so a caller can record which terrain a height came from (RESEARCH3's ea10). A
-        live release's mosaics rebuilt during the query make it a 503, Retry-After 1: never heights under a
-        stamp they were not all read from."""
+        (store.stamp_key of tiles.source_stamp of the want's release model, ground.RELEASE_MODEL: both bare wants
+        are "bare", whose stamp covers the 10 m and the 2 m mosaics): for a frozen release its registered one, for a
+        live one what was on disk then, so a caller can record which terrain a height came from. A live release's
+        mosaics rebuilt during the query make it a 503, Retry-After 1: never heights under a stamp they were not
+        all read from."""
         lim().check_read(request)
         r = _terrain_release(rid)
         if (q.points is None) == (q.bbox is None):
@@ -186,21 +187,22 @@ def create_app(store: store_mod.Store | None = None, limits: Limits | None = Non
                 raise HTTPException(422, f"{len(q.points)} points, past {cap}")
             pts = q.points
         lim().check_make(request, max(1.0, len(pts) / tiles.N ** 2))
+        model = ground_mod.RELEASE_MODEL[q.want]
         if r.immutable:
-            if q.want not in r.sources:
-                raise HTTPException(404, f"release {rid} has no {q.want} model")
-            if store_mod.stamp_key(tiles.source_stamp(q.want)) != store_mod.stamp_key(r.sources[q.want]):
-                raise HTTPException(409, f"the {q.want} mosaics changed since release {rid} was "
+            if model not in r.sources:
+                raise HTTPException(404, f"release {rid} has no {model} model")
+            if store_mod.stamp_key(tiles.source_stamp(model)) != store_mod.stamp_key(r.sources[model]):
+                raise HTTPException(409, f"the {model} mosaics changed since release {rid} was "
                                          f"registered; ask a newer release")
         async with lim().making:
-            stamp = store_mod.stamp_key(tiles.source_stamp(q.want))
+            stamp = store_mod.stamp_key(tiles.source_stamp(model))
             try:
                 g = await run_in_threadpool(ground_mod.sample_ground, [p[0] for p in pts],
                                             [p[1] for p in pts], q.want, single_source=q.single_source)
             except ground_mod.GroundConfigError as e:
                 raise HTTPException(503, str(e))
-            if store_mod.stamp_key(tiles.source_stamp(q.want)) != stamp:
-                raise HTTPException(503, f"the {q.want} mosaics changed during this query; ask again",
+            if store_mod.stamp_key(tiles.source_stamp(model)) != stamp:
+                raise HTTPException(503, f"the {model} mosaics changed during this query; ask again",
                                     headers={"Retry-After": "1"})
         out = {"release": rid, "want": q.want, "stamp": stamp, "vertical": "orthometric",
                "heights": [round(float(h), 3) if st == "ok" else None for h, st in zip(g.height, g.status)],
@@ -323,8 +325,9 @@ class GroundQuery(BaseModel):
     points: list[list[float]] | None = None       # [[lon, lat], ...]
     bbox: list[float] | None = None               # [w, s, e, n], sampled every step_m
     step_m: float = 10.0
-    want: Literal["bare", "surface"] = "bare"
-    single_source: bool = False                   # surface: refuse a batch spanning ČÚZK and GLO-30
+    want: Literal["bare", "surface", "bare_finest"] = "bare"    # ground.WANTS
+    single_source: bool = False                   # refuse a batch spanning two models (surface: ČÚZK and GLO-30;
+                                                  # bare_finest: DTM2 and DTM10)
 
 
 app = create_app()
