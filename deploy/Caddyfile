@@ -8,6 +8,13 @@
 # known. The terrain mosaics have a path of their own, /<EARTH_DEM_PREFIX>/..., long and secret for good.
 # Anything else has its connection closed with no answer. The API hands out release ids, never URLs, so
 # nothing it says leaks or misses a prefix. No access log: it would write the prefixes down.
+{
+	# compose.yml's healthcheck asks the admin API every 30 s, and each request was a line in the log (97% of it)
+	log {
+		exclude admin.api
+	}
+}
+
 (earth) {
 	# The terrain mosaics as plain files, for a client that reads them itself with GDAL range requests
 	# (/vsicurl/, e.g. a depth renderer): only what earth itself reads, never the LAZ downloads or the
