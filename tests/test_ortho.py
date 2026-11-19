@@ -39,18 +39,18 @@ def test_a_tile_is_passed_on_as_it_came_and_never_kept(svc):
     assert asked == [CHURCH, CHURCH]                               # the ortho service caches, not earth
 
 
-
-def test_a_partial_tile_is_cached_briefly_and_a_full_one_for_months(svc, monkeypatch):
-    # a PNG is a tile with transparency (the overview before its sheets are in, a sheet not fetched): it fills in
-    # later, so it keeps LIVE; a JPEG is imagery all over, kept by browsers for 3 months
+def test_a_full_tile_is_kept_by_browsers_for_90_days_and_a_partial_one_for_5_minutes(svc, monkeypatch):
+    # the ortho service sends JPEG only for a tile with imagery all over (its cache is `format: mixed`); a PNG has
+    # transparency (ground no sheet covers, the overview before its sheets are in) and fills in later
     c, _ = svc
-    png = b"\x89PNG\r\n\x1a\n" + b"x" * 100
-    monkeypatch.setattr(ortho, "fetch", lambda z, x, y: (png, "image/png", 0.0))
     z, x, y = CHURCH
-    r = c.get(f"/t/ortho-a/ortho/{z}/{x}/{y}.jpg")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
-    assert r.headers["cache-control"] == app_mod.LIVE
-    assert "max-age=7776000" in app_mod.ORTHO_OPAQUE
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 100
+    for body, mt, kept in ((JPEG, "image/jpeg", "public, max-age=7776000"), (png, "image/png", "public, max-age=300")):
+        monkeypatch.setattr(ortho, "fetch", lambda z, x, y, body=body, mt=mt: (body, mt, 0.0))
+        r = c.get(f"/t/ortho-a/ortho/{z}/{x}/{y}.jpg")
+        assert r.status_code == 200 and r.headers["content-type"] == mt and r.content == body
+        assert r.headers["cache-control"] == kept
+
 
 class Upstream:
     """urlopen faked: the ortho service answering JPEG with an X-Ortho-Cost, optionally held at a gate."""
