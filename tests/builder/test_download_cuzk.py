@@ -185,6 +185,31 @@ def test_an_unpacked_sheet_is_done_without_its_zip_and_without_asking(tmp_path: 
     assert asked == []
 
 
+def test_a_rasterized_sheet_is_done_without_its_laz_and_without_asking(tmp_path: Path, monkeypatch):
+    """A sheet's .laz may be deleted once its 2 m raster is made: the next run must not download it again. A
+    sheet with neither is fetched as before."""
+    import argparse
+
+    import download_cuzk as dc
+    monkeypatch.setattr(dc, "http_get", lambda url: DATASET_FEED.encode())
+    dc.load_index(tmp_path, "dmp1g", refresh=False)
+    rast = tmp_path / "rast"
+    rast.mkdir()
+    (rast / "BENE09.tif").write_bytes(b"raster")
+    asked = []
+    monkeypatch.setattr(dc, "http_get", lambda url: asked.append(url) or b"")
+    s = dc.Sheet(code="BENE09", feed_url="https://x/feed", bbox=(0, 0, 1, 1))
+    assert "rasterized" in dc.fetch_sheet(s, tmp_path, "5514", unzip=True, sleep=0, rasterized=rast)
+    a = argparse.Namespace(out=tmp_path, dataset="dmp1g", bbox=None, limit=None, workers=1,
+                           epsg="5514", unzip=True, sleep=0.0, rasterized=rast)
+    dc.cmd_fetch(a)
+    assert asked == [] and not (tmp_path / "laz").exists()
+    with pytest.raises(Exception):
+        dc.fetch_sheet(dc.Sheet(code="BENE10", feed_url="https://x/feed", bbox=(0, 0, 1, 1)),
+                       tmp_path, "5514", unzip=True, sleep=0, rasterized=rast)
+    assert asked == ["https://x/feed"]
+
+
 def test_unzip_drops_the_zip_once_unpacked_unless_kept(tmp_path: Path, monkeypatch):
     import download_cuzk as dc
     src = tmp_path / "src.zip"

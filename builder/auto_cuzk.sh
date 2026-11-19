@@ -15,9 +15,12 @@
 # Every stage is INCREMENTAL: downloads skip complete files, rasterize/warp
 # skip existing outputs, the cheap VRT rebuild picks up whatever is present.
 # So the tree only ever grows — a bigger bbox later (or all of Czechia:
-# build_all.sh) just adds sheets. Disk note: laz + 2 m rasters + 10 m warps stay in the volume
+# build_all.sh) just adds sheets. Disk note: 2 m rasters + warps stay in the volume
 # (that's the resumability); a zip is dropped once its .laz is unpacked, and an
-# unpacked .laz counts as downloaded (download_cuzk.py, 2026-10-02).
+# unpacked .laz counts as downloaded (download_cuzk.py, 2026-10-02); so does a
+# rasterized sheet, so its .laz may be deleted to free the disk (--rasterized).
+# A new rasterization (--force) needs the .laz back: delete the sheet's raster
+# and the fetch gets it again.
 #
 # VRTs are written to a temp name and renamed over the old one, as the GLO-30
 # VRT is: a reader (the API samples dtm10.vrt on every run page) sees the old
@@ -58,7 +61,7 @@ if [ "$n" = 0 ]; then
 fi
 
 if [ "$layer" != dsm ]; then
-    python download_cuzk.py fetch --dataset dmr5g --out "$base/dl/dmr5g" --bbox "$bbox" --unzip
+    python download_cuzk.py fetch --dataset dmr5g --out "$base/dl/dmr5g" --bbox "$bbox" --unzip --rasterized "$base/rast/dtm"
     python build_mosaic.py rasterize --jobs "$jobs" --laz-dir "$base/dl/dmr5g/laz" --out-dir "$base/rast/dtm" --res-m 2 --kind dtm
     python build_mosaic.py warp --jobs "$jobs" --in-dir "$base/rast/dtm" --out-dir "$base/warp/dtm10" --res-m 10 --s-srs "EPSG:5514+8357"
     # 2 m bare earth: the 3D world's fine terrain tiles (zoom 16-18, api routers/terrain.py);
@@ -68,7 +71,7 @@ if [ "$layer" != dsm ]; then
     vrt dtm10
 fi
 if [ "$layer" != dtm ]; then
-    python download_cuzk.py fetch --dataset dmp1g --out "$base/dl/dmp1g" --bbox "$bbox" --unzip
+    python download_cuzk.py fetch --dataset dmp1g --out "$base/dl/dmp1g" --bbox "$bbox" --unzip --rasterized "$base/rast/dsm"
     python build_mosaic.py rasterize --jobs "$jobs" --laz-dir "$base/dl/dmp1g/laz" --out-dir "$base/rast/dsm" --res-m 2 --kind dsm
     python build_mosaic.py warp --jobs "$jobs" --in-dir "$base/rast/dsm" --out-dir "$base/warp/dsm10" --res-m 10 --s-srs "EPSG:5514+8357"
     # 2 m near ring: native-ish lidar sharpness for the first few km — nearby

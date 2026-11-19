@@ -181,7 +181,12 @@ def unpacked(out: Path, code: str) -> Path | None:
 
 
 def fetch_sheet(sheet: Sheet, out: Path, epsg: str, unzip: bool, sleep: float,
-                keep_zips: bool = False) -> str:
+                keep_zips: bool = False, rasterized: Path | None = None) -> str:
+    # RASTERIZED IS DONE. Once build_mosaic.py has made a sheet's 2 m raster
+    # (<rasterized>/<CODE>.tif, written whole or not at all), its point cloud has been read and may be
+    # deleted to free the disk. Without this check the next run would download every deleted one again.
+    if rasterized is not None and (rasterized / f"{sheet.code}.tif").exists():
+        return f"{sheet.code}: up to date (rasterized)"
     # UNPACKED IS DONE (2026-10-02). The zip only carries the .laz -- LAZ is already compressed,
     # so the zip is the same size again -- and with --unzip it is dropped once unpacked: whole-CZ,
     # keeping both doubled ~91 GB. So a sheet whose .laz exists is complete without its zip, and
@@ -255,7 +260,7 @@ def cmd_fetch(a: argparse.Namespace) -> None:
     done = errs = 0
     with cf.ThreadPoolExecutor(max_workers=a.workers) as pool:
         futures = {pool.submit(fetch_sheet, s, a.out, a.epsg, a.unzip, a.sleep,
-                               getattr(a, "keep_zips", False)): s
+                               getattr(a, "keep_zips", False), getattr(a, "rasterized", None)): s
                    for s in sheets}
         for fut in cf.as_completed(futures):
             s = futures[fut]
@@ -310,6 +315,9 @@ def main(argv: list[str] | None = None) -> None:
                          "exists counts as downloaded)")
     pf.add_argument("--keep-zips", action="store_true",
                     help="with --unzip, keep each zip beside its .laz")
+    pf.add_argument("--rasterized", type=Path,
+                    help="build_mosaic.py's raster dir: a sheet whose <CODE>.tif is there counts as "
+                         "downloaded, its .laz kept or not")
     a = ap.parse_args(argv)
     {"index": cmd_index, "fetch": cmd_fetch, "count": cmd_count}[a.cmd](a)
 
