@@ -121,6 +121,14 @@ an address in debt waits. The settings are
 | `deploy/` | compose, Caddy, the server's layout and `.env`, the unhealthy-container timer (`deploy/README.md`) |
 | `tests/` | earth's tests and the builder's (`tests/builder/`); the ortho service's are in `ortho/tests/` |
 
+## License
+
+The code is under the GNU Affero General Public License, version 3 (`LICENSE`). Two files in the
+repository are OpenStreetMap data, under the ODbL (© OpenStreetMap contributors), not the AGPL:
+`earth/reference_heights.json` (the summits a terrain release is checked at) and
+`ortho/app/places.json` (the towns the ortho service fetches ahead). What earth serves keeps its
+sources' licences, and `GET /attribution` says what each requires shown (`earth/attribution.py`).
+
 ## Develop
 
 ```sh
