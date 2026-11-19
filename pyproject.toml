@@ -2,6 +2,8 @@
 name = "earth"
 version = "0.1.0"
 description = "hillview's public geodata service: terrain tiles (and later OSM, orthophoto, point clouds) by release and channel"
+# the README: "the GNU Affero General Public License, version 3" (LICENSE); the ODbL data files it names are not code
+license = "AGPL-3.0-only"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.139",
