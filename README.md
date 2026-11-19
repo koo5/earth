@@ -13,8 +13,8 @@ the clients carry (`https://earth.hillview.cz/<prefix>/...`, `deploy/README.md`)
 |---|---|
 | `GET /channels`, `GET /channels/{name}` | which release of each layer a channel serves (`prod`, `beta`) |
 | `GET /releases/{id}` | what a release is made from (the mosaics' stamp, the archive, the areas, the generator) |
-| `GET /t/{release}/terrain/{surface\|bare}/{z}/{x}/{y}.{q16\|f32}` | a terrain tile: 65 × 65 ellipsoidal heights and a source byte per sample (`earth/tiles.py`) |
-| `POST /t/{release}/terrain/ground` | the ground at points or over a box, with a status per point (`ok`, `not_fetched`, `outside`, …); orthometric, as the models give it (`earth/ground.py`) |
+| `GET /t/{release}/terrain/{surface\|bare}/{z}/{x}/{y}.{q16\|f32}` | a terrain tile: 65 × 65 ellipsoidal heights (the mosaic's + the EGM2008 geoid, 44.45 m at Brandýs nad Labem; said by `X-Tile-Heights: ellipsoidal`) and a source byte per sample (`earth/tiles.py`) |
+| `POST /t/{release}/terrain/ground` | the ground at points or over a box, with a status per point (`ok`, `not_fetched`, `outside`, …); orthometric, as the models give it (said by `"vertical": "orthometric"`). `want` is `bare` (DTM10) or `surface` (DSM10, else GLO-30), each point's `src` naming its model (`earth/ground.py`) |
 | `GET /t/{release}/ortho/{z}/{x}/{y}.jpg` | ČÚZK Ortofoto ČR (CC BY 4.0), 12.5 cm, from the ortho service as it came, never kept here; Czechia only. A tile whose sheets are still downloading is a 503 with `Retry-After` at once: come back then (`earth/ortho.py`) |
 | `GET /t/{release}/osm/{z}/{x}/{y}.mvt` | OpenStreetMap (ODbL) as vector tiles from the release's PMTiles archive: buildings, walls, roads, water with raw tags and `osm_id`, zoom 13-15; 204 for empty ground (`earth/osm.py`) |
 | `GET /t/{release}/models/manifest.json`, `.../models/assets/{sha256}.glb` | IPR Praha's 3D buildings (2020, CC BY 4.0) as GLB meshes with ellipsoidal heights, prepared ahead by area and served only as the release's manifest names them; Prague only (`earth/citymodels.py`) |
