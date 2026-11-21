@@ -12,6 +12,7 @@ names the data relative to the checkout):
     dem/        terrain sources and mosaics (the builder writes them; read-only to earth)
     store/      releases, channels, kept tiles, osm/, models/, grids/
     ortho/      the ortho service: sheets/ (JP2, fetched as needed), state/ (index, overview), cache/
+    osm-build/  the OSM extract and what is built from it (osm/build.sh, osm/names.sh)
     garage/     Garage's meta/ (sqlite, snapshots/) and data/ (blocks)
     sites/      Caddy sites the server serves besides earth's, one `<name>.caddy` each, not in this
                 repository (`Caddyfile` imports them; an empty directory serves earth alone)
@@ -32,12 +33,48 @@ unanswered. It stays out of this repository, so a search there does not hand it 
 clients; if it ever must change, serve the old and new side by side until they have moved.
 
 Deploy: `cd ~/earth/src && git pull --ff-only && cd deploy && podman compose up -d --build` (earth, ortho, Caddy
-and Garage; the builder is a one-shot, `podman compose run --rm builder`). At boot `podman-restart.service`
-(user, enabled) starts every container with `restart: always`. Unhealthy containers: `earth-heal.timer`
+and Garage; the builder is a one-shot, below). At boot `podman-restart.service` (user, enabled) starts every
+container with `restart: always`. Unhealthy containers: `earth-heal.timer`
 runs `heal-unhealthy.sh` every minute, which recreates through compose a container that is unhealthy, or whose
 `earth.heal.probe` does not answer from the host (`cp earth-heal.service earth-heal.timer ~/.config/systemd/user/
 && systemctl --user daemon-reload && systemctl --user enable --now earth-heal.timer`);
 `journalctl --user -u earth-heal` says what it did.
+
+## Publishing releases
+
+Each `earth` command runs inside the earth container: `podman compose exec -T earth
+earth ...` in `deploy/` (in a shell loop add `</dev/null`, or the first call eats
+the loop's input).
+
+```sh
+# terrain: build, then register what is in place under the DEM directory (checked at surveyed summits first)
+podman compose run --rm builder                              # all of Czechia; or [bbox] [dtm|dsm|both]
+earth release register terrain terrain-<date> --note "..."   # a bbox with no summit: --unchecked "<why>"
+
+# orthophoto: one live release; the year is what its attribution shows (ČÚZK, <year>)
+earth release register ortho ortho-cuzk-sheets --live --year 2024-2025
+
+# OSM: build, move the archive into the store's osm/, register it
+osm/build.sh ~/earth/osm-build
+mv ~/earth/osm-build/czech-republic-<date>.pmtiles ~/earth/store/osm/
+earth release register osm osm-cz-<extract date> --pmtiles czech-republic-<date>.pmtiles
+
+# names: from the extract the map was built from (osm/build.sh downloads it; Geofabrik keeps dated ones,
+# czech-republic-<yymmdd>.osm.pbf, into sources/czech-republic.osm.pbf); heights from this machine's mosaics.
+# The export is not mounted in the earth container: give it on stdin.
+osm/names.sh ~/earth/osm-build
+earth names build /dev/stdin --out /var/lib/earth/names/names-cz-<date>.json < ~/earth/osm-build/czech-republic-names.geojsonseq
+earth release register names names-cz-<date> --names names-cz-<date>.json
+
+# city models: the EGM96 grid once, then each area (prints its sha256), then a release of areas
+curl -fLo ~/earth/store/grids/egm96_15.gtx https://download.osgeo.org/proj/vdatum/egm96_15/egm96_15.gtx
+earth models prepare --lat 50.0909 --lon 14.4005 --radius 600
+earth release register models models-ipr-<date> --areas <sha256>[,<sha256>...]
+
+# channels: beta first; prod when it has been looked at
+earth channel set beta terrain=<id> ortho=<id> osm=<id> models=<id> names=<id>
+earth channel set prod terrain=<id> ortho=<id> osm=<id> models=<id> names=<id>
+```
 
 ## Garage: an S3 store beside earth
 

@@ -43,7 +43,7 @@ that earth's ortho layer asks (`EARTH_ORTHO_URL`). It holds none of ČÚZK's 20,
 under it, fetched from ČÚZK's open-data endpoint on that first request (seconds); below zoom 15,
 from a 4 m overview of Czechia that fetched sheets are warped into in batches. A batch waits for a
 quiet spell or an hour, never one per sheet. A sheet is kept for good; at the disk budget
-(`SHEET_BUDGET_GB`) fetching stops. `EARTH_ORTHO_URL` names it; there is no other upstream.
+(`SHEET_BUDGET_GB`) fetching stops. earth has no other orthophoto upstream.
 
 **OSM**: `osm/build.sh` runs planetiler with `osm/hillview-map.yml` over Geofabrik's Czech extract
 into one `.pmtiles`.
@@ -55,45 +55,13 @@ from the surface model and making every height ellipsoidal; one JSON file per re
 **City models**: `earth models prepare` reads IPR Praha's I3S scene for one circular area (at most
 2 km) and writes content-addressed GLBs; EGM96 heights are converted with a grid kept in the store.
 
-## Publishing
+## Releases
 
-On the server each `earth` command runs inside the earth container: `podman compose exec -T earth
-earth ...` in `deploy/` (in a shell loop add `</dev/null`, or the first call eats
-the loop's input).
-
-```sh
-# terrain: build, then register what is in place under the DEM directory (checked at surveyed summits first)
-podman compose --profile build run --rm builder              # all of Czechia; or [bbox] [dtm|dsm|both]
-earth release register terrain terrain-<date> --note "..."   # a bbox with no summit: --unchecked "<why>"
-
-# orthophoto: one live release; the year is what its attribution shows (ČÚZK, <year>)
-earth release register ortho ortho-cuzk-sheets --live --year 2024-2025
-
-# OSM: build, move the archive into the store's osm/, register it
-osm/build.sh ~/earth/osm-build
-mv ~/earth/osm-build/czech-republic-<date>.pmtiles ~/earth/store/osm/
-earth release register osm osm-cz-<extract date> --pmtiles czech-republic-<date>.pmtiles
-
-# names: from the extract the map was built from (osm/build.sh downloads it; Geofabrik keeps dated ones,
-# czech-republic-<yymmdd>.osm.pbf, into sources/czech-republic.osm.pbf); heights from this machine's mosaics.
-# The export is not mounted in the earth container: give it on stdin.
-osm/names.sh ~/earth/osm-build
-earth names build /dev/stdin --out /var/lib/earth/names/names-cz-<date>.json < ~/earth/osm-build/czech-republic-names.geojsonseq
-earth release register names names-cz-<date> --names names-cz-<date>.json
-
-# city models: the EGM96 grid once, then each area (prints its sha256), then a release of areas
-curl -fLo ~/earth/store/grids/egm96_15.gtx https://download.osgeo.org/proj/vdatum/egm96_15/egm96_15.gtx
-earth models prepare --lat 50.0909 --lon 14.4005 --radius 600
-earth release register models models-ipr-<date> --areas <sha256>[,<sha256>...]
-
-# channels: beta first; prod when it has been looked at
-earth channel set beta terrain=<id> ortho=<id> osm=<id> models=<id> names=<id>
-earth channel set prod terrain=<id> ortho=<id> osm=<id> models=<id> names=<id>
-```
-
-A frozen release refuses to make tiles once its mosaics change: new sheets mean a new release. A
-machine whose ground is still being built registers a `--live` terrain release instead. It follows
-the mosaics, keeps its tiles per mosaic stamp, and is never served as immutable.
+Each layer's release is built and registered on the server with the `earth` CLI, and a channel then
+points at it (the commands: `deploy/README.md`). A frozen release refuses to make tiles once its
+mosaics change: new sheets mean a new release. A machine whose ground is still being built registers a
+`--live` terrain release instead. It follows the mosaics, keeps its tiles per mosaic stamp, and is never
+served as immutable.
 
 Before a terrain release is registered, each ČÚZK mosaic (bare and surface, 10 m and 2 m) is read at the
 summits in `earth/reference_heights.json` (open summits, their OSM `ele`, one per ~25 km), and the release is
@@ -118,7 +86,7 @@ an address in debt waits. The settings are
 | `builder/` | the terrain builder, run as the compose service `builder` (`deploy/builder.Dockerfile`) |
 | `ortho/` | the orthophoto service, the compose service `ortho` |
 | `osm/` | the OSM build and its planetiler schema |
-| `deploy/` | compose, Caddy, the server's layout and `.env`, the unhealthy-container timer (`deploy/README.md`) |
+| `deploy/` | compose, Caddy, Garage, the server's layout and `.env`, publishing releases, the unhealthy-container timer (`deploy/README.md`) |
 | `tests/` | earth's tests and the builder's (`tests/builder/`); the ortho service's are in `ortho/tests/` |
 
 ## License
