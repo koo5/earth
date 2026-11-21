@@ -42,8 +42,8 @@ that earth's ortho layer asks (`EARTH_ORTHO_URL`). It holds none of ČÚZK's 20,
 (2 × 2 km, ~1.5 TB in all) until a view needs them. From zoom 15 a tile is drawn from the sheets
 under it, fetched from ČÚZK's open-data endpoint on that first request (seconds); below zoom 15,
 from a 4 m overview of Czechia that fetched sheets are warped into in batches. A batch waits for a
-quiet spell or an hour, never one per sheet. A sheet is kept for good; at the disk budget (450 GB)
-fetching stops. `EARTH_ORTHO_URL` names it; there is no other upstream.
+quiet spell or an hour, never one per sheet. A sheet is kept for good; at the disk budget
+(`SHEET_BUDGET_GB`) fetching stops. `EARTH_ORTHO_URL` names it; there is no other upstream.
 
 **OSM**: `osm/build.sh` runs planetiler with `osm/hillview-map.yml` over Geofabrik's Czech extract
 into one `.pmtiles`.

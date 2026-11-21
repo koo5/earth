@@ -16,11 +16,13 @@ names the data relative to the checkout):
     sites/      Caddy sites the server serves besides earth's, one `<name>.caddy` each, not in this
                 repository (`Caddyfile` imports them; an empty directory serves earth alone)
 
-`~/earth/src/deploy/.env` (mode 600, never committed) holds the two path prefixes and Garage's secret:
+`~/earth/src/deploy/.env` (mode 600, never committed) holds the two path prefixes, Garage's secret and the
+server's settings:
 
     EARTH_PREFIX=<8 random [a-z0-9]>          # earth's base, https://earth.hillview.cz/<prefix>/...
     EARTH_DEM_PREFIX=<openssl rand -hex 24>   # the terrain mosaics' own path, secret for good
     GARAGE_RPC_SECRET=<openssl rand -hex 32>  # Garage's node-to-node secret (and its CLI's)
+    SHEET_BUDGET_GB=<GB>                      # the disk the ortho service's sheets may take; past it, no fetching
 
     python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8)))'
 

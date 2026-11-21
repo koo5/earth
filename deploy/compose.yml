@@ -61,7 +61,8 @@ services:
     cpus: 3
     mem_limit: 6g
     environment:
-      SHEET_BUDGET_GB: 450
+      # the disk this server gives the sheets: its own setting, not the code's
+      SHEET_BUDGET_GB: ${SHEET_BUDGET_GB:?set SHEET_BUDGET_GB (GB of sheets the ortho service may hold) in deploy/.env}
     volumes:
       - ../../ortho/sheets:/data
       - ../../ortho/state:/state
