@@ -12,6 +12,8 @@ names the data relative to the checkout):
     dem/        terrain sources and mosaics (the builder writes them; read-only to earth)
     store/      releases, channels, kept tiles, osm/, models/, grids/
     ortho/      the ortho service: sheets/ (JP2, fetched as needed), state/ (index, overview), cache/
+    sites/      Caddy sites the server serves besides earth's, one `<name>.caddy` each, not in this
+                repository (`Caddyfile` imports them; an empty directory serves earth alone)
 
 `~/earth/src/deploy/.env` (mode 600, never committed) holds the two path prefixes:
 
