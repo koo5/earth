@@ -39,8 +39,6 @@ runs `heal-unhealthy.sh` every minute, which recreates through compose a contain
 && systemctl --user daemon-reload && systemctl --user enable --now earth-heal.timer`);
 `journalctl --user -u earth-heal` says what it did.
 
-The same site also answers in plain HTTP on the server's loopback, port 8081, for an ssh tunnel.
-
 ## Garage: an S3 store beside earth
 
 `garage` (`compose.yml`, `garage.toml`) is an S3 object store for files other services keep on this server;

@@ -54,11 +54,3 @@ earth.hillview.cz {
 # Sites the server serves besides earth's are not in this repository: each is a file in the server's own sites/
 # (compose.yml mounts it here), imported as it is. With none there, Caddy serves earth alone.
 import sites/*.caddy
-
-# The same routes in plain HTTP on the server's loopback only, for a tunnel while 80/443 are closed.
-# `bind`: a site address names the Host it answers, not the interface; without it the port listens on
-# every interface and a client could send that Host from outside.
-http://127.0.0.1:8081 {
-	bind 127.0.0.1
-	import earth
-}
