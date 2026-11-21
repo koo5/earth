@@ -1,0 +1,37 @@
+# Garage: an S3 object store beside earth, for files other services keep on this server (compose.yml). One
+# node for now; a second machine joins later as another node in the layout.
+#
+# The secret is not here: GARAGE_RPC_SECRET comes from deploy/.env. There is no admin token, so the admin
+# API answers only /health (the heal's probe) and /metrics, on loopback.
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+# sqlite, not the default lmdb: with one copy there is no other node to rebuild metadata from, and Garage's
+# docs say lmdb "is prone to database corruption after an unclean shutdown"; sqlite is slower, which a few
+# uploads a minute never feel.
+db_engine = "sqlite"
+# One copy only: a crash must neither corrupt the metadata nor lose a block an upload was told is stored.
+metadata_fsync = true
+data_fsync = true
+# a copy of the metadata to come back to (meta/snapshots; Garage keeps the newest two)
+metadata_auto_snapshot_interval = "6h"
+replication_factor = 1
+# what it holds is compressed already (images): zstd would spend CPU earth wants for nothing
+compression_level = "none"
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# what boto3 signs for when no region is configured
+s3_region = "us-east-1"
+api_bind_addr = "[::]:3900"
+# virtual-host addressing: Host <bucket>.hillview.cz is that bucket
+root_domain = ".hillview.cz"
+
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".hillview.cz"
+index = "index.html"
+
+[admin]
+api_bind_addr = "[::]:3903"

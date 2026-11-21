@@ -101,6 +101,37 @@ services:
       retries: 3
       start_period: 30s
     labels: { earth.heal: restart }
+  garage:
+    # Garage, an S3 object store for files other services keep on this server (./garage.toml): not earth's. A
+    # network of its own, so nothing in earth's stack reaches it but Caddy on loopback, through a site of the
+    # server's own (./Caddyfile, sites/).
+    # v2.5.0 released 2026-10-24 (cooloff)
+    image: docker.io/dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5
+    restart: always
+    user: "0:0"
+    <<: *hardened
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET (openssl rand -hex 32) in deploy/.env}
+      # at info Garage logs every request: a line per object read
+      RUST_LOG: garage=info
+    # loopback only: Caddy (host network) reaches the S3 API (3900) and the web endpoint (3902); 3903 is the
+    # admin port, which without an admin token answers only /health and /metrics
+    ports: ["127.0.0.1:3900:3900", "127.0.0.1:3902:3902", "127.0.0.1:3903:3903"]
+    cpus: 3
+    mem_limit: 1g
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - ../../garage/meta:/var/lib/garage/meta
+      - ../../garage/data:/var/lib/garage/data
+    networks: [garage]
+    healthcheck:
+      # the image is the garage binary alone (no shell, no curl): ask the node itself over its RPC
+      test: ["CMD", "/garage", "status"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    labels: { earth.heal: restart, earth.heal.probe: "http://127.0.0.1:3903/health" }
   builder:
     # one-shot: everything earth's terrain reads, built into the DEM dir from the sources (builder/build_all.sh).
     # `podman compose run --rm builder [bbox] [layer]`. Incremental, so a rerun resumes; never part of `up`.
@@ -118,6 +149,7 @@ services:
 networks:
   earth:
     ipam: { config: [{ subnet: 172.30.0.0/24, gateway: 172.30.0.1 }] }
+  garage: {}
 volumes:
   caddy_data:
   caddy_config:
